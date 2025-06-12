@@ -73,13 +73,6 @@ try {
   const files = await response.json();
   if (!Array.isArray(files)) return tools;
 
-  const toolPatterns = [
-    'axe', 'axe-core', '@axe-core', 'axe-playwright', 'axe-puppeteer',
-    'pa11y', 'pa11y-ci', 'lighthouse', 'accessibility-checker',
-    'jest-axe', 'cypress-axe', 'storybook-addon-a11y',
-    'eslint-plugin-jsx-a11y', 'react-axe'
-  ];
-
   for (const file of files) {
     if (file.name.endsWith('.yml') || file.name.endsWith('.yaml')) {
       const workflowUrl = file.download_url;
@@ -88,12 +81,8 @@ try {
         if (!workflowResponse.ok) continue;
         const workflowContent = (await workflowResponse.text()).toLowerCase();
         
-        for (const pattern of toolPatterns) {
-          if (workflowContent.includes(pattern.toLowerCase())) {
-            if (pattern.includes('axe')) tools.axe = true;
-            if (pattern.includes('pa11y')) tools.pa11y = true;
-          }
-        }
+        if (workflowContent.includes('axe')) tools.axe = true;
+        if (workflowContent.includes('pa11y')) tools.pa11y = true;
       } catch (error) {}
     }
   }
@@ -111,13 +100,6 @@ const dependencyFiles = [
   'composer.json', 'composer.lock',
   'pom.xml', 'build.gradle', 'build.gradle.kts',
   'Cargo.toml', 'go.mod'
-];
-
-const toolPatterns = [
-  'axe', 'axe-core', '@axe-core', 'axe-playwright', 'axe-puppeteer',
-  'pa11y', 'pa11y-ci', 'jest-axe', 'cypress-axe', 'react-axe',
-  'storybook-addon-a11y', 'eslint-plugin-jsx-a11y',
-  'lighthouse', 'accessibility-checker', 'wave-cli'
 ];
 
 let tools = { axe: false, pa11y: false };
@@ -139,12 +121,8 @@ for (const fileName of dependencyFiles) {
     if (file.encoding === 'base64') {
       const content = Buffer.from(file.content, 'base64').toString('utf-8').toLowerCase();
       
-      for (const pattern of toolPatterns) {
-        if (content.includes(pattern.toLowerCase())) {
-          if (pattern.includes('axe')) tools.axe = true;
-          if (pattern.includes('pa11y')) tools.pa11y = true;
-        }
-      }
+      if (content.includes('axe')) tools.axe = true;
+      if (content.includes('pa11y')) tools.pa11y = true;
     }
   } catch (error) {}
 }
@@ -181,30 +159,23 @@ const batchSize = 50;
 const processedRepos = new Set();
 
 const searchQueries = [
-  'axe-core in:file sort:stars-desc',
-  'pa11y in:file sort:stars-desc', 
-  '@axe-core/core in:file sort:stars-desc',
-  'accessibility-testing in:file sort:stars-desc',
-  'topic:accessibility sort:stars-desc',
-  'topic:a11y sort:stars-desc',
-  'filename:package.json axe sort:stars-desc',
-  'filename:package.json pa11y sort:stars-desc',
-  'path:.github/workflows axe sort:stars-desc',
-  'path:.github/workflows pa11y sort:stars-desc',
-  'language:JavaScript accessibility sort:stars-desc',
-  'language:TypeScript accessibility sort:stars-desc',
-  'topic:frontend testing sort:stars-desc',
-  'topic:react accessibility sort:stars-desc',
-  'topic:vue accessibility sort:stars-desc',
-  'topic:angular accessibility sort:stars-desc',
-  'jest-axe in:file sort:stars-desc',
-  'cypress-axe in:file sort:stars-desc',
-  'react-axe in:file sort:stars-desc',
-  'storybook-addon-a11y in:file sort:stars-desc',
-  'eslint-plugin-jsx-a11y in:file sort:stars-desc',
-  'lighthouse in:file sort:stars-desc',
-  'accessibility-checker in:file sort:stars-desc',
-  'topic:web sort:stars-desc'
+  'axe-core in:file stars:>=40000 sort:stars-desc',
+  'pa11y in:file stars:>=40000 sort:stars-desc', 
+  'axe in:file stars:>=40000 sort:stars-desc',
+  'topic:accessibility stars:>=40000 sort:stars-desc',
+  'topic:a11y stars:>=40000 sort:stars-desc',
+  'filename:package.json axe stars:>=40000 sort:stars-desc',
+  'filename:package.json pa11y stars:>=40000 sort:stars-desc',
+  'path:.github/workflows axe stars:>=40000 sort:stars-desc',
+  'path:.github/workflows pa11y stars:>=40000 sort:stars-desc',
+  'language:JavaScript accessibility stars:>=40000 sort:stars-desc',
+  'language:TypeScript accessibility stars:>=40000 sort:stars-desc',
+  'topic:frontend testing stars:>=40000 sort:stars-desc',
+  'topic:react accessibility stars:>=40000 sort:stars-desc',
+  'topic:vue accessibility stars:>=40000 sort:stars-desc',
+  'topic:angular accessibility stars:>=40000 sort:stars-desc',
+  'accessibility-testing in:file stars:>=40000 sort:stars-desc',
+  'topic:web stars:>=40000 sort:stars-desc'
 ];
 
 for (const queryString of searchQueries) {
@@ -231,6 +202,12 @@ for (const queryString of searchQueries) {
         
         const repo = edge.node;
         const repoId = `${repo.owner.login}/${repo.name}`;
+        
+        // Garantir que tem pelo menos 40000 estrelas
+        if (repo.stargazerCount < 40000) {
+          console.log(`Repositório ${repoId} tem apenas ${repo.stargazerCount} estrelas, pulando...`);
+          continue;
+        }
         
         if (processedRepos.has(repoId)) continue;
         processedRepos.add(repoId);
@@ -272,6 +249,78 @@ for (const queryString of searchQueries) {
     } catch (error) {
       console.error(`Erro na busca: ${error.message}`);
       await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+}
+
+// Se não encontrou 1000 com 40000+ estrelas, buscar com menos estrelas
+if (found < 1000) {
+  console.log(`\n🔍 Expandindo busca para repositórios com menos de 40000 estrelas...`);
+  
+  const expandedQueries = [
+    'axe-core in:file stars:>=10000 sort:stars-desc',
+    'pa11y in:file stars:>=10000 sort:stars-desc',
+    'topic:accessibility stars:>=10000 sort:stars-desc',
+    'topic:a11y stars:>=10000 sort:stars-desc',
+    'topic:web stars:>=10000 sort:stars-desc'
+  ];
+
+  for (const queryString of expandedQueries) {
+    if (found >= 1000) break;
+    
+    console.log(`\n🔍 Busca expandida: ${queryString}`);
+    let after = null;
+    
+    while (found < 1000) {
+      const variables = { queryString, first: batchSize, after };
+      
+      try {
+        const data = await graphqlRequest(searchRepositoriesQuery, variables);
+        
+        if (!data.search.edges.length) break;
+
+        for (const edge of data.search.edges) {
+          if (found >= 1000) break;
+          
+          const repo = edge.node;
+          const repoId = `${repo.owner.login}/${repo.name}`;
+          
+          if (processedRepos.has(repoId)) continue;
+          processedRepos.add(repoId);
+
+          console.log(`Analisando: ${repoId} (${repo.stargazerCount} estrelas)`);
+
+          const [wf, dep] = await Promise.all([
+            checkWorkflows(repo.owner.login, repo.name),
+            checkDependencies(repo.owner.login, repo.name)
+          ]);
+
+          if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
+            const row = {
+              nameWithOwner: repoId,
+              url: repo.url,
+              stars: repo.stargazerCount,
+              axe_wf: wf.axe ? 'Sim' : 'Não',
+              pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
+              axe_dep: dep.axe ? 'Sim' : 'Não',
+              pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
+            };
+
+            appendToCSV(row);
+            found++;
+            console.log(`✅ Salvo no CSV (${found}): ${repoId}`);
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        if (!data.search.pageInfo.hasNextPage) break;
+        after = data.search.pageInfo.endCursor;
+        
+      } catch (error) {
+        console.error(`Erro na busca: ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
     }
   }
 }
