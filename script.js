@@ -244,7 +244,7 @@ for (let i = 0; i < optimizedQueries.length; i++) {
             axe_wf: wf.axe ? 'Sim' : 'Não',
             pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
             axe_dep: dep.axe ? 'Sim' : 'Não',
-            pa11y_dep: dep.pa11y ? 'Não'
+            pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
           };
 
           appendToCSV(row);
