@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm init -y
-          npm install node-fetch dotenv
+          npm install node-fetch@2 dotenv
       
       - name: Run script continuously
         env:
