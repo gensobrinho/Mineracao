@@ -145,71 +145,42 @@ query($queryString: String!, $first: Int!, $after: String) {
 async function main() {
 writeHeader();
 let found = 0;
-let totalProcessed = 0;
 const processedRepos = new Set();
 const batchSize = 50;
 
-// Consultas otimizadas para encontrar repositórios com 40000+ estrelas que usam axe-core ou pa11y
-const optimizedQueries = [
-  // Busca direta por axe-core em arquivos
-  'axe-core in:file stars:>=40000 sort:stars-desc',
-  'axe-core filename:package.json stars:>=40000 sort:stars-desc',
-  '@axe-core/core in:file stars:>=40000 sort:stars-desc',
-  
-  // Busca direta por pa11y em arquivos  
-  'pa11y in:file stars:>=40000 sort:stars-desc',
-  'pa11y filename:package.json stars:>=40000 sort:stars-desc',
-  'pa11y-ci in:file stars:>=40000 sort:stars-desc',
-  
-  // Busca em workflows
-  'axe path:.github/workflows stars:>=40000 sort:stars-desc',
-  'pa11y path:.github/workflows stars:>=40000 sort:stars-desc',
-  'axe-core path:.github/workflows stars:>=40000 sort:stars-desc',
-  
-  // Busca por tópicos relacionados a acessibilidade
-  'topic:accessibility stars:>=40000 sort:stars-desc',
-  'topic:a11y stars:>=40000 sort:stars-desc',
-  'topic:web-accessibility stars:>=40000 sort:stars-desc',
-  
-  // Busca por linguagens específicas com acessibilidade
-  'language:JavaScript accessibility stars:>=40000 sort:stars-desc',
-  'language:TypeScript accessibility stars:>=40000 sort:stars-desc',
-  'language:JavaScript axe stars:>=40000 sort:stars-desc',
-  'language:TypeScript axe stars:>=40000 sort:stars-desc',
-  
-  // Busca por frameworks populares com acessibilidade
-  'react accessibility stars:>=40000 sort:stars-desc',
-  'vue accessibility stars:>=40000 sort:stars-desc',
-  'angular accessibility stars:>=40000 sort:stars-desc',
-  'next.js accessibility stars:>=40000 sort:stars-desc',
-  
-  // Busca ampla em projetos web populares
-  'topic:frontend stars:>=40000 sort:stars-desc',
-  'topic:web stars:>=40000 sort:stars-desc',
-  'topic:webapp stars:>=40000 sort:stars-desc',
-  'topic:website stars:>=40000 sort:stars-desc'
+// Consultas simples que funcionam, baseadas no script original
+const queries = [
+  'topic:web sort:stars-desc',
+  'topic:frontend sort:stars-desc', 
+  'topic:javascript sort:stars-desc',
+  'topic:react sort:stars-desc',
+  'topic:vue sort:stars-desc',
+  'topic:angular sort:stars-desc',
+  'topic:accessibility sort:stars-desc',
+  'language:JavaScript sort:stars-desc',
+  'language:TypeScript sort:stars-desc'
 ];
 
-console.log('🚀 Iniciando busca otimizada para repositórios 40000+ estrelas com axe-core/pa11y...');
-console.log(`📝 Total de consultas: ${optimizedQueries.length}`);
+console.log('🚀 Iniciando busca otimizada...');
 
-for (let i = 0; i < optimizedQueries.length; i++) {
+for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
   if (found >= 1000) break;
   
-  const queryString = optimizedQueries[i];
-  console.log(`\n🔍 [${i+1}/${optimizedQueries.length}] Executando: ${queryString}`);
+  const queryString = queries[queryIndex];
+  console.log(`\n🔍 [${queryIndex + 1}/${queries.length}] Executando: ${queryString}`);
   
   let after = null;
-  let queryResults = 0;
-  
-  try {
-    while (found < 1000) {
-      const variables = { queryString, first: batchSize, after };
-      
+  let reposFromThisQuery = 0;
+
+  while (found < 1000) {
+    const variables = { queryString, first: batchSize, after };
+    
+    try {
+      console.log(`Buscando lote... já encontrados: ${found}`);
       const data = await graphqlRequest(searchRepositoriesQuery, variables);
-      
+
       if (!data.search.edges.length) {
-        console.log(`   ✅ Consulta finalizada. Encontrados: ${queryResults} repositórios`);
+        console.log('Nenhum repositório retornado para esta consulta.');
         break;
       }
 
@@ -217,28 +188,23 @@ for (let i = 0; i < optimizedQueries.length; i++) {
         if (found >= 1000) break;
         
         const repo = edge.node;
-        const repoId = `${repo.owner.login}/${repo.name}`;
+        const nameWithOwner = `${repo.owner.login}/${repo.name}`;
         
-        // Garantir que tem pelo menos 40000 estrelas
+        // Filtrar por 40000+ estrelas
         if (repo.stargazerCount < 40000) continue;
         
-        totalProcessed++;
-        
         // Evitar duplicatas
-        if (processedRepos.has(repoId)) continue;
-        processedRepos.add(repoId);
-        
-        queryResults++;
-        console.log(`   📊 Analisando: ${repoId} (${repo.stargazerCount} ⭐)`);
+        if (processedRepos.has(nameWithOwner)) continue;
+        processedRepos.add(nameWithOwner);
 
-        const [wf, dep] = await Promise.all([
-          checkWorkflows(repo.owner.login, repo.name),
-          checkDependencies(repo.owner.login, repo.name)
-        ]);
+        console.log(`Analisando: ${nameWithOwner} (${repo.stargazerCount} estrelas)`);
+
+        const wf = await checkWorkflows(repo.owner.login, repo.name);
+        const dep = await checkDependencies(repo.owner.login, repo.name);
 
         if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
           const row = {
-            nameWithOwner: repoId,
+            nameWithOwner,
             url: repo.url,
             stars: repo.stargazerCount,
             axe_wf: wf.axe ? 'Sim' : 'Não',
@@ -249,33 +215,31 @@ for (let i = 0; i < optimizedQueries.length; i++) {
 
           appendToCSV(row);
           found++;
-          console.log(`   ✅ ENCONTRADO! (${found}/1000): ${repoId} - AXE: ${wf.axe||dep.axe ? '✓' : '✗'} | PA11Y: ${wf.pa11y||dep.pa11y ? '✓' : '✗'}`);
+          reposFromThisQuery++;
+          console.log(`✅ Salvo no CSV (${found}): ${JSON.stringify(row)}`);
+        } else {
+          console.log('Nenhuma ferramenta encontrada, não salvo no CSV.');
         }
-        
-        // Rate limiting
-        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
-      if (!data.search.pageInfo.hasNextPage) break;
+      if (!data.search.pageInfo.hasNextPage) {
+        console.log('Não há mais páginas para esta consulta.');
+        break;
+      }
       after = data.search.pageInfo.endCursor;
+      
+    } catch (error) {
+      console.error(`Erro na busca: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
-  } catch (error) {
-    console.error(`   ❌ Erro na consulta: ${error.message}`);
-    await new Promise(resolve => setTimeout(resolve, 5000));
   }
   
-  console.log(`   📈 Progresso geral: ${found}/1000 encontrados | ${processedRepos.size} únicos processados`);
+  console.log(`Consulta finalizada. Encontrados nesta consulta: ${reposFromThisQuery}`);
 }
 
-console.log('\n🎉 BUSCA FINALIZADA!');
-console.log(`📊 Estatísticas finais:`);
-console.log(`   • Repositórios com axe/pa11y encontrados: ${found}`);
-console.log(`   • Total de repositórios únicos processados: ${processedRepos.size}`);
-console.log(`   • Total de repositórios analisados: ${totalProcessed}`);
-console.log(`   • Arquivo CSV: ${csvPath}`);
+console.log('\nProcesso finalizado!');
+console.log(`Total encontrado: ${found}`);
+console.log(`Total de repositórios únicos processados: ${processedRepos.size}`);
 }
 
-main().catch(error => {
-console.error('💥 Erro fatal:', error);
-process.exit(1);
-});
+main();
