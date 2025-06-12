@@ -146,7 +146,7 @@ async function main() {
   let found = 0;
   let after = null;
   const batchSize = 100;
-  const queryString = 'topic:web stars:<=40000 sort:stars-desc';
+  const queryString = 'stars:<=40000 sort:stars-desc';
 
   while (found < 1000) {
     const variables = {
