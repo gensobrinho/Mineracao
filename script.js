@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 require('dotenv').config();
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_TOKEN = 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;
 
 if (!GITHUB_TOKEN) {
 console.error('Erro: O token do GitHub não foi encontrado. Certifique-se de que o arquivo .env contém a variável GITHUB_TOKEN.');
