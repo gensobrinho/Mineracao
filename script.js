@@ -176,16 +176,18 @@ async function main() {
       const dep = await checkDependencies(repo.owner.login, repo.name);
 
       if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
-        appendToCSV({
+        const row = {
           nameWithOwner,
+          url: repo.url,
           stars: repo.stargazerCount,
           axe_wf: wf.axe ? 'Sim' : 'Não',
           pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
           axe_dep: dep.axe ? 'Sim' : 'Não',
-          pa11y_dep: dep.pa11y ? 'Sim' : 'Não',
-        });
+          pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
+        };
+        appendToCSV(row);
         found++;
-        console.log(`Salvo no CSV (${found}): ${nameWithOwner}`);
+        console.log(`Salvo no CSV (${found}): ${JSON.stringify(row)}`);
       } else {
         console.log('Ferramentas não encontradas, pulando.');
       }
