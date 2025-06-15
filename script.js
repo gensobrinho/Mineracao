@@ -146,13 +146,11 @@ async function main() {
   let after = null;
   const batchSize = 50;
 
-  // 🔍 Consulta aprimorada:
   const queryString = [
     'axe-core',
     'pa11y',
     'in:name,description,readme',
     'stars:<40000',
-    'pushed:>2024-01-01' // opcional, para manter projetos atualizados
   ].join(' ');
 
   while (found < 1000) {
@@ -167,7 +165,6 @@ async function main() {
       if (found >= 1000) break;
       const repo = edge.node;
 
-      // Ainda mantendo o filtro de estrelas < 40k
       if (repo.stargazerCount >= 40000) continue;
 
       const nameWithOwner = `${repo.owner.login}/${repo.name}`;
