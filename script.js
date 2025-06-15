@@ -145,10 +145,13 @@ async function main() {
   let found = 0;
   let after = null;
   const batchSize = 50;
-  const queryString = [
-    'topic:web',
+
+    const queryString = [
+    'axe-core',
+    'pa11y',
+    'in:name,description,readme',
     'stars:<40000',
-    'sort:stars-desc'
+    'sort:stars-desc',
   ].join(' ');
 
   while (found < 1000) {
