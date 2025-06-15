@@ -24,6 +24,18 @@ const appendToCSV = (row) => {
   fs.appendFileSync(csvPath, line);
 };
 
+const loadExistingRepos = () => {
+  if (!fs.existsSync(csvPath)) return new Set();
+
+  const data = fs.readFileSync(csvPath, 'utf8');
+  const lines = data.split('\n').slice(1);
+  const repos = lines
+    .filter(line => line.trim() !== '')
+    .map(line => line.split(',')[0]);
+
+  return new Set(repos);
+};
+
 async function graphqlRequest(query, variables) {
   const response = await fetch('https://api.github.com/graphql', {
     method: 'POST',
@@ -135,10 +147,9 @@ query($queryString: String!, $first: Int!, $after: String) {
 }
 `;
 
-async function processQuery(queryString) {
+async function processQuery(queryString, existingRepos) {
   let after = null;
   const batchSize = 50;
-  const seen = new Set();
   let totalFound = 0;
 
   while (true) {
@@ -151,11 +162,13 @@ async function processQuery(queryString) {
 
     for (const edge of edges) {
       const repo = edge.node;
-
       const nameWithOwner = `${repo.owner.login}/${repo.name}`;
+
       if (repo.stargazerCount >= 40000) continue;
-      if (seen.has(nameWithOwner)) continue;
-      seen.add(nameWithOwner);
+      if (existingRepos.has(nameWithOwner)) {
+        console.log(`⏭️ Já encontrado anteriormente: ${nameWithOwner}, pulando.`);
+        continue;
+      }
 
       console.log(`🚀 Analisando: ${nameWithOwner} (${repo.stargazerCount}⭐)`);
 
@@ -163,16 +176,16 @@ async function processQuery(queryString) {
       const dep = await checkDependencies(repo.owner.login, repo.name);
 
       if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
-      const row = {
-        nameWithOwner,
-        url: repo.url,
-        stars: repo.stargazerCount,
-        axe_wf: wf.axe ? 'Sim' : 'Não',
-        pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
-        axe_dep: dep.axe ? 'Sim' : 'Não',
-        pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
-      };
+        const row = {
+          nameWithOwner,
+          stars: repo.stargazerCount,
+          axe_wf: wf.axe ? 'Sim' : 'Não',
+          pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
+          axe_dep: dep.axe ? 'Sim' : 'Não',
+          pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
+        };
         appendToCSV(row);
+        existingRepos.add(nameWithOwner);
         totalFound++;
         console.log(`✅ Salvo no CSV (${totalFound}): ${JSON.stringify(row)}`);
       } else {
@@ -188,15 +201,21 @@ async function processQuery(queryString) {
 async function main() {
   writeHeader();
 
-const queryStrings = [
-  'axe in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-  'pa11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-  'a11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-  'accessibility in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-];
+  const existingRepos = loadExistingRepos();
+
+  const queryStrings = [
+    'axe in:name,description,readme stars:<40000 sort:stars-desc',
+    'axe in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+    'pa11y in:name,description,readme stars:<40000 sort:stars-desc',
+    'pa11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+    'a11y in:name,description,readme stars:<40000 sort:stars-desc',
+    'a11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+    'accessibility in:name,description,readme stars:<40000 sort:stars-desc',
+    'accessibility in:name,description,readme topic:web stars:<40000 sort:stars-desc'
+  ];
 
   for (const queryString of queryStrings) {
-    await processQuery(queryString);
+    await processQuery(queryString, existingRepos);
   }
 
   console.log('🏁 Processo finalizado!');
