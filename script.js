@@ -146,12 +146,11 @@ async function main() {
   let after = null;
   const batchSize = 50;
 
-  const queryString = [
-    'axe-core',
-    'pa11y',
-    'in:name,description,readme',
-    'stars:<40000',
-  ].join(' ');
+const searchTerms  = 'axe-core pa11y in:name,description,readme';
+const optionalTopic = 'topic:web';
+const baseQualifiers = 'stars:<40000 sort:stars-desc';
+
+const queryString = `(${searchTerms} OR ${optionalTopic}) ${baseQualifiers}`;
 
   while (found < 1000) {
     const variables = { queryString, first: batchSize, after };
