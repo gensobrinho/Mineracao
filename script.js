@@ -188,10 +188,12 @@ async function processQuery(queryString) {
 async function main() {
   writeHeader();
 
-  const queryStrings = [
-    'axe-core in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-    'pa11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-  ];
+const queryStrings = [
+  'axe in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+  'pa11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+  'a11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+  'accessibility in:name,description,readme topic:web stars:<40000 sort:stars-desc',
+];
 
   for (const queryString of queryStrings) {
     await processQuery(queryString);
