@@ -150,7 +150,7 @@ async function main() {
     'axe-core',
     'pa11y',
     'in:name,description,readme',
-    'topic:web'
+    'topic:web',
     'stars:<40000',
     'sort:stars-desc',
   ].join(' ');
