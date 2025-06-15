@@ -121,89 +121,82 @@ return { axe, pa11y };
 
 const searchRepositoriesQuery = `
 query($queryString: String!, $first: Int!, $after: String) {
-search(query: $queryString, type: REPOSITORY, first: $first, after: $after) {
-edges {
-  node {
-    ... on Repository {
-      name
-      owner {
-        login
+  search(query: $queryString, type: REPOSITORY, first: $first, after: $after) {
+    repositoryCount
+    edges {
+      node {
+        ... on Repository {
+          name
+          owner { login }
+          stargazerCount
+        }
       }
-      url
-      stargazerCount
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
     }
   }
-}
-pageInfo {
-  endCursor
-  hasNextPage
-}
-}
 }
 `;
 
 async function main() {
-writeHeader();
-let found = 0;
-let after = null;
-const batchSize = 50; 
+  writeHeader();
+  let found = 0;
+  let after = null;
+  const batchSize = 50;
 
-const queryString = 'sort:stars-desc';
+  // 🔍 Consulta aprimorada:
+  const queryString = [
+    'axe-core',
+    'pa11y',
+    'in:name,description,readme',
+    'stars:<40000',
+    'pushed:>2024-01-01' // opcional, para manter projetos atualizados
+  ].join(' ');
 
-while (found < 1000) {
-const variables = {
-  queryString,
-  first: batchSize,
-  after: after
-};
+  while (found < 1000) {
+    const variables = { queryString, first: batchSize, after };
+    console.log(`Buscando lote com "${queryString}"... já encontrados: ${found}`);
 
-console.log(`Buscando lote... já encontrados: ${found}`);
-const data = await graphqlRequest(searchRepositoriesQuery, variables);
+    const data = await graphqlRequest(searchRepositoriesQuery, variables);
+    const edges = data.search.edges;
+    if (edges.length === 0) break;
 
-if (!data.search.edges.length) {
-  console.log('Nenhum repositório retornado, encerrando busca.');
-  break;
-}
+    for (const edge of edges) {
+      if (found >= 1000) break;
+      const repo = edge.node;
 
-for (const edge of data.search.edges) {
-  if (found >= 1000) break;
-  const repo = edge.node;
-  if (repo.stargazerCount > 40000 && found === 0) continue;
-  if (repo.stargazerCount > 40000 && found > 0) continue; 
+      // Ainda mantendo o filtro de estrelas < 40k
+      if (repo.stargazerCount >= 40000) continue;
 
-  const nameWithOwner = `${repo.owner.login}/${repo.name}`;
-  console.log(`Analisando: ${nameWithOwner} (${repo.stargazerCount} estrelas)`);
+      const nameWithOwner = `${repo.owner.login}/${repo.name}`;
+      console.log(`Analisando: ${nameWithOwner} (${repo.stargazerCount}⭐)`);
 
-  const wf = await checkWorkflows(repo.owner.login, repo.name);
-  const dep = await checkDependencies(repo.owner.login, repo.name);
+      const wf = await checkWorkflows(repo.owner.login, repo.name);
+      const dep = await checkDependencies(repo.owner.login, repo.name);
 
-  if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
-    const row = {
-      nameWithOwner,
-      url: repo.url,
-      stars: repo.stargazerCount,
-      axe_wf: wf.axe ? 'Sim' : 'Não',
-      pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
-      axe_dep: dep.axe ? 'Sim' : 'Não',
-      pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
-    };
+      if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
+        appendToCSV({
+          nameWithOwner,
+          stars: repo.stargazerCount,
+          axe_wf: wf.axe ? 'Sim' : 'Não',
+          pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
+          axe_dep: dep.axe ? 'Sim' : 'Não',
+          pa11y_dep: dep.pa11y ? 'Sim' : 'Não',
+        });
+        found++;
+        console.log(`Salvo no CSV (${found}): ${nameWithOwner}`);
+      } else {
+        console.log('Ferramentas não encontradas, pulando.');
+      }
+    }
 
-    appendToCSV(row);
-    found++;
-    console.log(`Salvo no CSV (${found}): ${JSON.stringify(row)}`);
-  } else {
-    console.log('Nenhuma ferramenta encontrada, não salvo no CSV.');
+    if (!data.search.pageInfo.hasNextPage) break;
+    after = data.search.pageInfo.endCursor;
   }
-}
 
-if (!data.search.pageInfo.hasNextPage) {
-  console.log('Não há mais páginas de resultados.');
-  break;
-}
-after = data.search.pageInfo.endCursor;
-}
-
-console.log('\nProcesso finalizado!');
+  console.log('Processo finalizado!');
 }
 
 main();
