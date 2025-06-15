@@ -204,14 +204,14 @@ async function main() {
   const existingRepos = loadExistingRepos();
 
   const queryStrings = [
-    'axe in:name,description,readme stars:<40000 sort:stars-desc',
-    'axe in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-    'pa11y in:name,description,readme stars:<40000 sort:stars-desc',
-    'pa11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-    'a11y in:name,description,readme stars:<40000 sort:stars-desc',
-    'a11y in:name,description,readme topic:web stars:<40000 sort:stars-desc',
-    'accessibility in:name,description,readme stars:<40000 sort:stars-desc',
-    'accessibility in:name,description,readme topic:web stars:<40000 sort:stars-desc'
+    'axe in:name,description,readme stars:<100000 sort:stars-desc',
+    'axe in:name,description,readme topic:web stars:<100000 sort:stars-desc',
+    'pa11y in:name,description,readme stars:<100000 sort:stars-desc',
+    'pa11y in:name,description,readme topic:web stars:<100000 sort:stars-desc',
+    'a11y in:name,description,readme stars:<100000 sort:stars-desc',
+    'a11y in:name,description,readme topic:web stars:<100000 sort:stars-desc',
+    'accessibility in:name,description,readme stars:<100000 sort:stars-desc',
+    'accessibility in:name,description,readme topic:web stars:<100000 sort:stars-desc'
   ];
 
   for (const queryString of queryStrings) {
