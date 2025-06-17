@@ -164,7 +164,7 @@ async function processQuery(queryString, existingRepos) {
       const repo = edge.node;
       const nameWithOwner = `${repo.owner.login}/${repo.name}`;
 
-      if (repo.stargazerCount >= 40000) continue;
+      if (repo.stargazerCount >= 100000) continue;
       if (existingRepos.has(nameWithOwner)) {
         console.log(`⏭️ Já encontrado anteriormente: ${nameWithOwner}, pulando.`);
         continue;
