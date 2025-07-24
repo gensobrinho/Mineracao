@@ -261,8 +261,6 @@ query($queryString: String!, $first: Int!, $after: String) {
           }
           url
           stargazerCount
-          description
-          topics
         }
       }
     }
