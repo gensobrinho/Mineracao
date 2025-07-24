@@ -316,19 +316,24 @@ async function processRepository(repo) {
     return null;
   }
 
-  console.log(`Analisando: ${nameWithOwner} (${repo.stargazerCount} estrelas)`);
+      console.log(`Analisando: ${nameWithOwner} (${repo.stargazerCount} estrelas)`);
 
-  try {
-    // Processamento paralelo das verificações
-    const [wf, dep, docs] = await Promise.allSettled([
-      checkWorkflows(repo.owner.login, repo.name),
-      checkDependencies(repo.owner.login, repo.name),
-      checkReadmeAndDocs(repo.owner.login, repo.name)
-    ]);
+    try {
+      // Processamento paralelo das verificações
+      const [wf, dep, docs] = await Promise.allSettled([
+        checkWorkflows(repo.owner.login, repo.name),
+        checkDependencies(repo.owner.login, repo.name),
+        checkReadmeAndDocs(repo.owner.login, repo.name)
+      ]);
 
-    const wfResult = wf.status === 'fulfilled' ? wf.value : { axe: false, pa11y: false, otherTools: [] };
-    const depResult = dep.status === 'fulfilled' ? dep.value : { axe: false, pa11y: false, otherTools: [] };
-    const docsResult = docs.status === 'fulfilled' ? docs.value : { otherTools: [] };
+      const wfResult = wf.status === 'fulfilled' ? wf.value : { axe: false, pa11y: false, otherTools: [] };
+      const depResult = dep.status === 'fulfilled' ? dep.value : { axe: false, pa11y: false, otherTools: [] };
+      const docsResult = docs.status === 'fulfilled' ? docs.value : { otherTools: [] };
+
+      // Debug: mostrar o que foi encontrado
+      console.log(`  🔍 Workflows: AXE=${wfResult.axe}, Pa11y=${wfResult.pa11y}, Outros=${wfResult.otherTools.length}`);
+      console.log(`  📦 Dependências: AXE=${depResult.axe}, Pa11y=${depResult.pa11y}, Outros=${depResult.otherTools.length}`);
+      console.log(`  📚 Documentação: Outros=${docsResult.otherTools.length}`);
 
     // Combina todas as ferramentas encontradas
     const allTools = [...new Set([
@@ -337,7 +342,9 @@ async function processRepository(repo) {
       ...docsResult.otherTools
     ])];
 
-    if (wfResult.axe || wfResult.pa11y || depResult.axe || depResult.pa11y || allTools.length > 0) {
+    // Condição mais abrangente para incluir repositórios
+    if (wfResult.axe || wfResult.pa11y || depResult.axe || depResult.pa11y || allTools.length > 0 || 
+        wfResult.otherTools.length > 0 || depResult.otherTools.length > 0) {
       const row = {
         nameWithOwner,
         url: repo.url,
@@ -354,9 +361,29 @@ async function processRepository(repo) {
       console.log(`Salvo no CSV: ${JSON.stringify(row)}`);
       return row;
     } else {
-      console.log('Nenhuma ferramenta encontrada, não salvo no CSV.');
-      processedRepos.add(nameWithOwner); // Marca como processado mesmo sem encontrar
-      return null;
+      // Incluir repositórios com muitas estrelas mesmo sem ferramentas detectadas
+      // pois podem ter ferramentas de acessibilidade não detectadas
+      if (repo.stargazerCount > 1000) {
+        console.log(`⭐ Incluindo repositório popular (${repo.stargazerCount} estrelas) mesmo sem ferramentas detectadas`);
+        const row = {
+          nameWithOwner,
+          url: repo.url,
+          stars: repo.stargazerCount,
+          axe_wf: 'Não',
+          pa11y_wf: 'Não',
+          axe_dep: 'Não',
+          pa11y_dep: 'Não',
+          other_tools: 'Repositório popular - verificação manual recomendada'
+        };
+        appendToCSV(row);
+        processedRepos.add(nameWithOwner);
+        console.log(`Salvo no CSV (repositório popular): ${JSON.stringify(row)}`);
+        return row;
+      } else {
+        console.log('Nenhuma ferramenta encontrada, não salvo no CSV.');
+        processedRepos.add(nameWithOwner); // Marca como processado mesmo sem encontrar
+        return null;
+      }
     }
   } catch (error) {
     console.log(`Erro ao processar ${nameWithOwner}: ${error.message}`);
@@ -391,7 +418,7 @@ async function searchWithQuery(queryString, maxResults = 1000) {
       }
 
       // Processa repositórios em paralelo (em lotes para não sobrecarregar)
-      const batch = data.search.edges.slice(0, 10); // Processa 10 por vez
+      const batch = data.search.edges.slice(0, 50); // Aumentado para 50 por vez
       totalSearched += batch.length; // Adiciona ao total de repositórios buscados
       
       const results = await Promise.allSettled(
@@ -417,7 +444,7 @@ async function searchWithQuery(queryString, maxResults = 1000) {
       }
 
       // Pequena pausa para evitar rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500)); // Reduzido para 500ms
 
     } catch (error) {
       console.log(`Erro na busca: ${error.message}`);
@@ -438,12 +465,12 @@ async function main() {
   writeHeader();
   let totalFound = 0;
   let totalSearched = 0;
-  const maxResultsPerQuery = 500; // Aumentado o limite por query
+  const maxResultsPerQuery = 2000; // Aumentado drasticamente o limite por query
 
   console.log('Iniciando busca otimizada por repositórios com ferramentas de acessibilidade...');
 
   for (const query of searchQueries) {
-    if (totalFound >= 2000) { // Limite total aumentado
+    if (totalFound >= 10000) { // Limite total muito aumentado
       console.log('Limite total atingido.');
       break;
     }
@@ -456,7 +483,7 @@ async function main() {
     console.log(`Total acumulado - Encontrados: ${totalFound}, Buscados: ${totalSearched}`);
     
     // Pausa entre queries para evitar rate limiting
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Reduzido para 1 segundo
   }
 
   saveProcessedRepos();
