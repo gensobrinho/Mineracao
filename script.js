@@ -14,11 +14,46 @@ const processedReposPath = 'processed_repos.json';
 
 // Carregar repositórios já processados para evitar duplicatas
 let processedRepos = new Set();
+
+// Função para carregar repositórios já existentes no CSV
+const loadExistingReposFromCSV = () => {
+  if (fs.existsSync(csvPath)) {
+    try {
+      const csvContent = fs.readFileSync(csvPath, 'utf8');
+      const lines = csvContent.split('\n').slice(1); // Remove o cabeçalho
+      
+      for (const line of lines) {
+        if (line.trim()) {
+          const parts = line.split(',');
+          if (parts.length > 0) {
+            const repoName = parts[0].trim();
+            if (repoName && repoName !== 'Repositório') {
+              processedRepos.add(repoName);
+            }
+          }
+        }
+      }
+      console.log(`📋 Carregados ${processedRepos.size} repositórios já existentes no CSV`);
+    } catch (error) {
+      console.log('Erro ao carregar repositórios do CSV:', error.message);
+    }
+  }
+};
+
+// Carregar repositórios do CSV primeiro
+loadExistingReposFromCSV();
+
+// Depois carregar do arquivo de controle (se existir)
 if (fs.existsSync(processedReposPath)) {
   try {
-    processedRepos = new Set(JSON.parse(fs.readFileSync(processedReposPath, 'utf8')));
+    const controlRepos = new Set(JSON.parse(fs.readFileSync(processedReposPath, 'utf8')));
+    // Adiciona os repositórios do controle ao set existente
+    for (const repo of controlRepos) {
+      processedRepos.add(repo);
+    }
+    console.log(`📋 Carregados ${controlRepos.size} repositórios do arquivo de controle`);
   } catch (error) {
-    console.log('Erro ao carregar repositórios processados, iniciando do zero.');
+    console.log('Erro ao carregar repositórios processados, continuando com os do CSV.');
   }
 }
 
@@ -277,6 +312,7 @@ async function processRepository(repo) {
   
   // Verifica se já foi processado
   if (processedRepos.has(nameWithOwner)) {
+    console.log(`⏭️  Pulando ${nameWithOwner} - já processado anteriormente`);
     return null;
   }
 
