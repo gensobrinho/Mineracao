@@ -88,6 +88,7 @@ try {
 } catch (error) {
   return { axe, pa11y };
 }
+}
 
 async function checkDependencies(owner, repo) {
 const dependencyFiles = ['package.json', 'requirements.txt', 'Gemfile', 'composer.json'];
@@ -116,7 +117,6 @@ for (const fileName of dependencyFiles) {
   }
 }
 return { axe, pa11y };
-}
 }
 
 // Múltiplas estratégias de busca otimizadas
