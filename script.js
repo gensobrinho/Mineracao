@@ -5,126 +5,96 @@ require('dotenv').config();
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 if (!GITHUB_TOKEN) {
-  console.error('Erro: O token do GitHub não foi encontrado. Certifique-se de que o arquivo .env contém a variável GITHUB_TOKEN.');
-  process.exit(1);
+console.error('Erro: O token do GitHub não foi encontrado. Certifique-se de que o arquivo .env contém a variável GITHUB_TOKEN.');
+process.exit(1);
 }
 
 const csvPath = 'repositorios_acessibilidade.csv';
-const processedReposPath = 'processed_repos.json';
-
-// Carregar repositórios já processados para evitar duplicatas
-let processedRepos = new Set();
-
-// Função para carregar repositórios já existentes no CSV
-const loadExistingReposFromCSV = () => {
-  if (fs.existsSync(csvPath)) {
-    try {
-      const csvContent = fs.readFileSync(csvPath, 'utf8');
-      const lines = csvContent.split('\n').slice(1); // Remove o cabeçalho
-      
-      for (const line of lines) {
-        if (line.trim()) {
-          const parts = line.split(',');
-          if (parts.length > 0) {
-            const repoName = parts[0].trim();
-            if (repoName && repoName !== 'Repositório') {
-              processedRepos.add(repoName);
-            }
-          }
-        }
-      }
-      console.log(`📋 Carregados ${processedRepos.size} repositórios já existentes no CSV`);
-    } catch (error) {
-      console.log('Erro ao carregar repositórios do CSV:', error.message);
-    }
-  }
-};
-
-// Carregar repositórios do CSV primeiro
-loadExistingReposFromCSV();
-
-// Depois carregar do arquivo de controle (se existir)
-if (fs.existsSync(processedReposPath)) {
-  try {
-    const controlRepos = new Set(JSON.parse(fs.readFileSync(processedReposPath, 'utf8')));
-    // Adiciona os repositórios do controle ao set existente
-    for (const repo of controlRepos) {
-      processedRepos.add(repo);
-    }
-    console.log(`📋 Carregados ${controlRepos.size} repositórios do arquivo de controle`);
-  } catch (error) {
-    console.log('Erro ao carregar repositórios processados, continuando com os do CSV.');
-  }
-}
-
 const writeHeader = () => {
-  if (!fs.existsSync(csvPath)) {
-    fs.writeFileSync(
-      csvPath,
-      'Repositório,Estrelas,AXE em Workflow,Pa11y em Workflow,AXE em Dependência,Pa11y em Dependência,Outras Ferramentas\n'
-    );
-  }
+if (!fs.existsSync(csvPath)) {
+  fs.writeFileSync(
+    csvPath,
+    'Repositório,Estrelas,AXE em Workflow,Pa11y em Workflow,AXE em Dependência,Pa11y em Dependência\n'
+  );
+}
 };
 
 const appendToCSV = (row) => {
-  const line = `${row.nameWithOwner},${row.stars},${row.axe_wf},${row.pa11y_wf},${row.axe_dep},${row.pa11y_dep},${row.other_tools}\n`;
-  fs.appendFileSync(csvPath, line);
+const line = `${row.nameWithOwner},${row.stars},${row.axe_wf},${row.pa11y_wf},${row.axe_dep},${row.pa11y_dep}\n`;
+fs.appendFileSync(csvPath, line);
 };
 
-const saveProcessedRepos = () => {
-  fs.writeFileSync(processedReposPath, JSON.stringify(Array.from(processedRepos)));
-};
+async function graphqlRequest(query, variables) {
+const response = await fetch('https://api.github.com/graphql', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ query, variables }),
+});
 
-async function graphqlRequest(query, variables, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await fetch('https://api.github.com/graphql', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ query, variables }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 403 && i < retries - 1) {
-          console.log('Rate limit atingido, aguardando...');
-          await new Promise(resolve => setTimeout(resolve, 60000)); // 1 minuto
-          continue;
-        }
-        throw new Error(`Erro na solicitação GraphQL: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      if (data.errors) {
-        throw new Error(`Erro GraphQL: ${JSON.stringify(data.errors)}`);
-      }
-      return data.data;
-    } catch (error) {
-      if (i === retries - 1) throw error;
-      console.log(`Tentativa ${i + 1} falhou, tentando novamente...`);
-      await new Promise(resolve => setTimeout(resolve, 2000 * (i + 1)));
-    }
-  }
+if (!response.ok) {
+  throw new Error(`Erro na solicitação GraphQL: ${response.statusText}`);
 }
 
-async function fetchWithTimeout(url, options = {}, timeout = 15000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
-  }
+const data = await response.json();
+return data.data;
+}
+
+async function fetchWithTimeout(url, options = {}, timeout = 30000) {
+const controller = new AbortController();
+const id = setTimeout(() => controller.abort(), timeout);
+try {
+  const response = await fetch(url, { ...options, signal: controller.signal });
+  clearTimeout(id);
+  return response;
+} catch (error) {
+  clearTimeout(id);
+  throw error;
+}
 }
 
 async function checkWorkflows(owner, repo) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/.github/workflows`;
-  let axe = false, pa11y = false, otherTools = [];
+const url = `https://api.github.com/repos/${owner}/${repo}/contents/.github/workflows`;
+let axe = false, pa11y = false;
+
+try {
+  const response = await fetchWithTimeout(url, {
+    headers: {
+      Authorization: `Bearer ${GITHUB_TOKEN}`,
+    },
+  });
+
+  if (response.status === 404) return { axe, pa11y };
+  if (!response.ok) throw new Error(`Erro ao buscar workflows: ${response.statusText}`);
+
+  const files = await response.json();
+  if (!Array.isArray(files)) return { axe, pa11y };
+
+  for (const file of files) {
+    if (file.name.endsWith('.yml') || file.name.endsWith('.yaml')) {
+      const workflowUrl = file.download_url;
+      try {
+        const workflowResponse = await fetchWithTimeout(workflowUrl, {}, 30000);
+        if (!workflowResponse.ok) continue;
+        const workflowContent = (await workflowResponse.text()).toLowerCase();
+        if (workflowContent.includes('axe')) axe = true;
+        if (workflowContent.includes('pa11y')) pa11y = true;
+      } catch (error) {}
+    }
+  }
+  return { axe, pa11y };
+} catch (error) {
+  return { axe, pa11y };
+}
+
+async function checkDependencies(owner, repo) {
+const dependencyFiles = ['package.json', 'requirements.txt', 'Gemfile', 'composer.json'];
+let axe = false, pa11y = false;
+
+for (const fileName of dependencyFiles) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
 
   try {
     const response = await fetchWithTimeout(url, {
@@ -133,139 +103,23 @@ async function checkWorkflows(owner, repo) {
       },
     });
 
-    if (response.status === 404) return { axe, pa11y, otherTools };
-    if (!response.ok) throw new Error(`Erro ao buscar workflows: ${response.statusText}`);
+    if (response.status === 404) continue;
+    if (!response.ok) throw new Error(`Erro ao buscar arquivo ${fileName}: ${response.statusText}`);
 
-    const files = await response.json();
-    if (!Array.isArray(files)) return { axe, pa11y, otherTools };
-
-    for (const file of files) {
-      if (file.name.endsWith('.yml') || file.name.endsWith('.yaml')) {
-        const workflowUrl = file.download_url;
-        try {
-          const workflowResponse = await fetchWithTimeout(workflowUrl, {}, 10000);
-          if (!workflowResponse.ok) continue;
-          const workflowContent = (await workflowResponse.text()).toLowerCase();
-          
-          // Detecção expandida de ferramentas de acessibilidade
-          if (workflowContent.includes('axe') || workflowContent.includes('axe-core')) axe = true;
-          if (workflowContent.includes('pa11y') || workflowContent.includes('pa11y-ci')) pa11y = true;
-          
-          // Outras ferramentas de acessibilidade
-          const accessibilityTools = [
-            'lighthouse', 'wave', 'html_codesniffer', 'accessibility-checker',
-            'axe-core', 'pa11y', 'pa11y-ci', 'axe-cli', 'axe-webdriverjs',
-            'accessibility', 'a11y', 'wcag', 'aria', 'screen-reader'
-          ];
-          
-          for (const tool of accessibilityTools) {
-            if (workflowContent.includes(tool) && !otherTools.includes(tool)) {
-              otherTools.push(tool);
-            }
-          }
-        } catch (error) {
-          // Ignora erros individuais de workflow
-        }
-      }
+    const file = await response.json();
+    if (file.encoding === 'base64') {
+      const content = Buffer.from(file.content, 'base64').toString('utf-8').toLowerCase();
+      if (content.includes('axe')) axe = true;
+      if (content.includes('pa11y')) pa11y = true;
     }
-    return { axe, pa11y, otherTools };
   } catch (error) {
-    return { axe, pa11y, otherTools };
   }
 }
-
-async function checkDependencies(owner, repo) {
-  const dependencyFiles = [
-    'package.json', 'requirements.txt', 'Gemfile', 'composer.json',
-    'pom.xml', 'build.gradle', 'Cargo.toml', 'go.mod', 'pubspec.yaml',
-    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'
-  ];
-  let axe = false, pa11y = false, otherTools = [];
-
-  for (const fileName of dependencyFiles) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-        },
-      });
-
-      if (response.status === 404) continue;
-      if (!response.ok) throw new Error(`Erro ao buscar arquivo ${fileName}: ${response.statusText}`);
-
-      const file = await response.json();
-      if (file.encoding === 'base64') {
-        const content = Buffer.from(file.content, 'base64').toString('utf-8').toLowerCase();
-        
-        // Detecção expandida
-        if (content.includes('axe') || content.includes('axe-core')) axe = true;
-        if (content.includes('pa11y') || content.includes('pa11y-ci')) pa11y = true;
-        
-        // Outras ferramentas de acessibilidade
-        const accessibilityTools = [
-          'lighthouse', 'wave', 'html_codesniffer', 'accessibility-checker',
-          'axe-core', 'pa11y', 'pa11y-ci', 'axe-cli', 'axe-webdriverjs',
-          'accessibility', 'a11y', 'wcag', 'aria', 'screen-reader',
-          'jest-axe', 'cypress-axe', 'axe-core', 'pa11y-reporter'
-        ];
-        
-        for (const tool of accessibilityTools) {
-          if (content.includes(tool) && !otherTools.includes(tool)) {
-            otherTools.push(tool);
-          }
-        }
-      }
-    } catch (error) {
-      // Ignora erros individuais de arquivo
-    }
-  }
-  return { axe, pa11y, otherTools };
+return { axe, pa11y };
+}
 }
 
-async function checkReadmeAndDocs(owner, repo) {
-  const files = ['README.md', 'README.txt', 'docs/README.md', 'documentation.md'];
-  let otherTools = [];
-
-  for (const fileName of files) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
-
-    try {
-      const response = await fetchWithTimeout(url, {
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-        },
-      });
-
-      if (response.status === 404) continue;
-      if (!response.ok) continue;
-
-      const file = await response.json();
-      if (file.encoding === 'base64') {
-        const content = Buffer.from(file.content, 'base64').toString('utf-8').toLowerCase();
-        
-        const accessibilityTools = [
-          'lighthouse', 'wave', 'html_codesniffer', 'accessibility-checker',
-          'axe-core', 'pa11y', 'pa11y-ci', 'axe-cli', 'axe-webdriverjs',
-          'accessibility', 'a11y', 'wcag', 'aria', 'screen-reader',
-          'jest-axe', 'cypress-axe', 'axe-core', 'pa11y-reporter'
-        ];
-        
-        for (const tool of accessibilityTools) {
-          if (content.includes(tool) && !otherTools.includes(tool)) {
-            otherTools.push(tool);
-          }
-        }
-      }
-    } catch (error) {
-      // Ignora erros
-    }
-  }
-  return { otherTools };
-}
-
-// Múltiplas estratégias de busca
+// Múltiplas estratégias de busca otimizadas
 const searchQueries = [
   'topic:web sort:stars-desc',
   'topic:accessibility sort:stars-desc',
@@ -281,124 +135,44 @@ const searchQueries = [
   'accessibility audit sort:stars-desc',
   'accessibility compliance sort:stars-desc',
   'accessibility tools sort:stars-desc',
-  'accessibility framework sort:stars-desc'
+  'accessibility framework sort:stars-desc',
+  'axe testing sort:stars-desc',
+  'pa11y testing sort:stars-desc',
+  'accessibility automation sort:stars-desc',
+  'accessibility ci sort:stars-desc',
+  'accessibility workflow sort:stars-desc'
 ];
 
 const searchRepositoriesQuery = `
 query($queryString: String!, $first: Int!, $after: String) {
-  search(query: $queryString, type: REPOSITORY, first: $first, after: $after) {
-    edges {
-      node {
-        ... on Repository {
-          name
-          owner {
-            login
-          }
-          url
-          stargazerCount
+search(query: $queryString, type: REPOSITORY, first: $first, after: $after) {
+  edges {
+    node {
+      ... on Repository {
+        name
+        owner {
+          login
         }
+        url
+        stargazerCount
       }
     }
-    pageInfo {
-      endCursor
-      hasNextPage
-    }
   }
+  pageInfo {
+    endCursor
+    hasNextPage
+  }
+}
 }
 `;
 
-async function processRepository(repo) {
-  const nameWithOwner = `${repo.owner.login}/${repo.name}`;
-  
-  // Verifica se já foi processado
-  if (processedRepos.has(nameWithOwner)) {
-    console.log(`⏭️  Pulando ${nameWithOwner} - já processado anteriormente`);
-    return null;
-  }
-
-      console.log(`Analisando: ${nameWithOwner} (${repo.stargazerCount} estrelas)`);
-
-    try {
-      // Processamento paralelo das verificações
-      const [wf, dep, docs] = await Promise.allSettled([
-        checkWorkflows(repo.owner.login, repo.name),
-        checkDependencies(repo.owner.login, repo.name),
-        checkReadmeAndDocs(repo.owner.login, repo.name)
-      ]);
-
-      const wfResult = wf.status === 'fulfilled' ? wf.value : { axe: false, pa11y: false, otherTools: [] };
-      const depResult = dep.status === 'fulfilled' ? dep.value : { axe: false, pa11y: false, otherTools: [] };
-      const docsResult = docs.status === 'fulfilled' ? docs.value : { otherTools: [] };
-
-      // Debug: mostrar o que foi encontrado
-      console.log(`  🔍 Workflows: AXE=${wfResult.axe}, Pa11y=${wfResult.pa11y}, Outros=${wfResult.otherTools.length}`);
-      console.log(`  📦 Dependências: AXE=${depResult.axe}, Pa11y=${depResult.pa11y}, Outros=${depResult.otherTools.length}`);
-      console.log(`  📚 Documentação: Outros=${docsResult.otherTools.length}`);
-
-    // Combina todas as ferramentas encontradas
-    const allTools = [...new Set([
-      ...wfResult.otherTools,
-      ...depResult.otherTools,
-      ...docsResult.otherTools
-    ])];
-
-    // Condição mais abrangente para incluir repositórios
-    if (wfResult.axe || wfResult.pa11y || depResult.axe || depResult.pa11y || allTools.length > 0 || 
-        wfResult.otherTools.length > 0 || depResult.otherTools.length > 0) {
-      const row = {
-        nameWithOwner,
-        url: repo.url,
-        stars: repo.stargazerCount,
-        axe_wf: wfResult.axe ? 'Sim' : 'Não',
-        pa11y_wf: wfResult.pa11y ? 'Sim' : 'Não',
-        axe_dep: depResult.axe ? 'Sim' : 'Não',
-        pa11y_dep: depResult.pa11y ? 'Sim' : 'Não',
-        other_tools: allTools.join('; ')
-      };
-
-      appendToCSV(row);
-      processedRepos.add(nameWithOwner);
-      console.log(`Salvo no CSV: ${JSON.stringify(row)}`);
-      return row;
-    } else {
-      // Incluir repositórios com muitas estrelas mesmo sem ferramentas detectadas
-      // pois podem ter ferramentas de acessibilidade não detectadas
-      if (repo.stargazerCount > 1000) {
-        console.log(`⭐ Incluindo repositório popular (${repo.stargazerCount} estrelas) mesmo sem ferramentas detectadas`);
-        const row = {
-          nameWithOwner,
-          url: repo.url,
-          stars: repo.stargazerCount,
-          axe_wf: 'Não',
-          pa11y_wf: 'Não',
-          axe_dep: 'Não',
-          pa11y_dep: 'Não',
-          other_tools: 'Repositório popular - verificação manual recomendada'
-        };
-        appendToCSV(row);
-        processedRepos.add(nameWithOwner);
-        console.log(`Salvo no CSV (repositório popular): ${JSON.stringify(row)}`);
-        return row;
-      } else {
-        console.log('Nenhuma ferramenta encontrada, não salvo no CSV.');
-        processedRepos.add(nameWithOwner); // Marca como processado mesmo sem encontrar
-        return null;
-      }
-    }
-  } catch (error) {
-    console.log(`Erro ao processar ${nameWithOwner}: ${error.message}`);
-    processedRepos.add(nameWithOwner); // Marca como processado para evitar reprocessamento
-    return null;
-  }
-}
-
 async function searchWithQuery(queryString, maxResults = 1000) {
   let found = 0;
-  let totalSearched = 0;
+  let totalAnalyzed = 0;
   let after = null;
   const batchSize = 100; // Aumentado para processar mais por vez
 
-  console.log(`\nIniciando busca com query: "${queryString}"`);
+  console.log(`\n🔍 Iniciando busca com query: "${queryString}"`);
 
   while (found < maxResults) {
     const variables = {
@@ -407,7 +181,7 @@ async function searchWithQuery(queryString, maxResults = 1000) {
       after: after
     };
 
-    console.log(`Buscando lote... já encontrados: ${found}, total buscados: ${totalSearched}`);
+    console.log(`📊 Buscando lote... já encontrados: ${found}, total analisados: ${totalAnalyzed}`);
     
     try {
       const data = await graphqlRequest(searchRepositoriesQuery, variables);
@@ -417,18 +191,38 @@ async function searchWithQuery(queryString, maxResults = 1000) {
         break;
       }
 
-      // Processa repositórios em paralelo (em lotes para não sobrecarregar)
-      const batch = data.search.edges.slice(0, 50); // Aumentado para 50 por vez
-      totalSearched += batch.length; // Adiciona ao total de repositórios buscados
-      
-      const results = await Promise.allSettled(
-        batch.map(edge => processRepository(edge.node))
-      );
+      for (const edge of data.search.edges) {
+        if (found >= maxResults) break;
+        const repo = edge.node;
+        
+        // Remove filtros limitantes para maximizar busca
+        // if (repo.stargazerCount > 40000 && found === 0) continue;
+        // if (repo.stargazerCount > 40000 && found > 0) continue; 
 
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
+        const nameWithOwner = `${repo.owner.login}/${repo.name}`;
+        console.log(`🔍 Analisando: ${nameWithOwner} (${repo.stargazerCount} estrelas)`);
+
+        const wf = await checkWorkflows(repo.owner.login, repo.name);
+        const dep = await checkDependencies(repo.owner.login, repo.name);
+        
+        totalAnalyzed++;
+
+        if (wf.axe || wf.pa11y || dep.axe || dep.pa11y) {
+          const row = {
+            nameWithOwner,
+            url: repo.url,
+            stars: repo.stargazerCount,
+            axe_wf: wf.axe ? 'Sim' : 'Não',
+            pa11y_wf: wf.pa11y ? 'Sim' : 'Não',
+            axe_dep: dep.axe ? 'Sim' : 'Não',
+            pa11y_dep: dep.pa11y ? 'Sim' : 'Não'
+          };
+
+          appendToCSV(row);
           found++;
-          if (found >= maxResults) break;
+          console.log(`✅ Salvo no CSV (${found}): ${JSON.stringify(row)}`);
+        } else {
+          console.log('❌ Nenhuma ferramenta encontrada, não salvo no CSV.');
         }
       }
 
@@ -438,62 +232,54 @@ async function searchWithQuery(queryString, maxResults = 1000) {
       }
       after = data.search.pageInfo.endCursor;
 
-      // Salva progresso periodicamente
-      if (found % 50 === 0) {
-        saveProcessedRepos();
-      }
-
       // Pequena pausa para evitar rate limiting
-      await new Promise(resolve => setTimeout(resolve, 500)); // Reduzido para 500ms
+      await new Promise(resolve => setTimeout(resolve, 500));
 
     } catch (error) {
-      console.log(`Erro na busca: ${error.message}`);
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      console.log(`❌ Erro na busca: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
-  console.log(`\n=== RESUMO DA QUERY: "${queryString}" ===`);
-  console.log(`📊 Total de repositórios buscados: ${totalSearched}`);
+  console.log(`\n📈 === RESUMO DA QUERY: "${queryString}" ===`);
+  console.log(`📊 Total de repositórios analisados: ${totalAnalyzed}`);
   console.log(`✅ Repositórios com ferramentas de acessibilidade encontrados: ${found}`);
-  console.log(`📈 Taxa de sucesso: ${totalSearched > 0 ? ((found / totalSearched) * 100).toFixed(2) : 0}%`);
+  console.log(`📈 Taxa de sucesso: ${totalAnalyzed > 0 ? ((found / totalAnalyzed) * 100).toFixed(2) : 0}%`);
   console.log(`===============================================\n`);
 
-  return { found, totalSearched };
+  return { found, totalAnalyzed };
 }
 
 async function main() {
   writeHeader();
   let totalFound = 0;
-  let totalSearched = 0;
-  const maxResultsPerQuery = 2000; // Aumentado drasticamente o limite por query
+  let totalAnalyzed = 0;
+  const maxResultsPerQuery = 1000; // Aumentado o limite por query
 
-  console.log('Iniciando busca otimizada por repositórios com ferramentas de acessibilidade...');
+  console.log('🚀 Iniciando busca otimizada por repositórios com ferramentas de acessibilidade...');
 
   for (const query of searchQueries) {
-    if (totalFound >= 10000) { // Limite total muito aumentado
-      console.log('Limite total atingido.');
+    if (totalFound >= 5000) { // Limite total aumentado
+      console.log('🎯 Limite total atingido.');
       break;
     }
 
     const result = await searchWithQuery(query, maxResultsPerQuery);
     totalFound += result.found;
-    totalSearched += result.totalSearched;
+    totalAnalyzed += result.totalAnalyzed;
     
-    console.log(`Query "${query}" completada. Encontrados: ${result.found}, Total buscados: ${result.totalSearched}`);
-    console.log(`Total acumulado - Encontrados: ${totalFound}, Buscados: ${totalSearched}`);
+    console.log(`📋 Query "${query}" completada.`);
+    console.log(`📊 Total acumulado - Encontrados: ${totalFound}, Analisados: ${totalAnalyzed}`);
     
     // Pausa entre queries para evitar rate limiting
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Reduzido para 1 segundo
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
 
-  saveProcessedRepos();
-  
   console.log(`\n🎉 ===== RESUMO FINAL ===== 🎉`);
-  console.log(`📊 Total de repositórios buscados: ${totalSearched}`);
-  console.log(`✅ Total de repositórios com ferramentas de acessibilidade: ${totalFound}`);
-  console.log(`📈 Taxa de sucesso geral: ${totalSearched > 0 ? ((totalFound / totalSearched) * 100).toFixed(2) : 0}%`);
+  console.log(`📊 Total de repositórios analisados/minerados: ${totalAnalyzed}`);
+  console.log(`✅ Total de repositórios inseridos na planilha: ${totalFound}`);
+  console.log(`📈 Taxa de sucesso geral: ${totalAnalyzed > 0 ? ((totalFound / totalAnalyzed) * 100).toFixed(2) : 0}%`);
   console.log(`📁 Arquivo CSV gerado: ${csvPath}`);
-  console.log(`📋 Controle de processamento: ${processedReposPath}`);
   console.log(`=====================================\n`);
 }
 
