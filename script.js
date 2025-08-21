@@ -140,7 +140,13 @@ const searchQueries = [
   'pa11y testing sort:stars-desc',
   'accessibility automation sort:stars-desc',
   'accessibility ci sort:stars-desc',
-  'accessibility workflow sort:stars-desc'
+  'accessibility workflow sort:stars-desc',
+  'lighthouse sort:stars-desc',
+  'wave accessibility sort:stars-desc',
+  'lighthouse audit sort:stars-desc',
+  'wave testing sort:stars-desc',
+  'lighthouse accessibility testing sort:stars-desc',
+  'wave automated testing sort:stars-desc'
 ];
 
 const searchRepositoriesQuery = `
