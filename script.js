@@ -147,40 +147,54 @@ query($queryString: String!, $first: Int!, $after: String) {
 async function main() {
   writeHeader();
   let totalFound = 0;
+  let totalAnalyzed = 0; // Contador total de repositórios analisados
   let after = null;
   const batchSize = 100; // Aumentado para mais eficiência
   const processedRepos = new Set(); // Para evitar duplicados
 
   const queryStrings = [
-    // Queries principais - termos específicos
-    'axe-core sort:stars-desc',
-    'pa11y sort:stars-desc',
-    'lighthouse audit sort:stars-desc',
-    'wave accessibility sort:stars-desc',
+    // 🌐 Aplicações web com ferramentas de acessibilidade (PRIORIDADE ALTA)
+    'axe-core topic:web language:JavaScript sort:stars-desc',
+    'pa11y topic:web language:JavaScript sort:stars-desc',
+    'lighthouse topic:web language:JavaScript sort:stars-desc',
+    'wave topic:web language:JavaScript sort:stars-desc',
     
-    // Queries mais amplas - tópicos
-    'topic:accessibility sort:stars-desc',
-    'topic:a11y sort:stars-desc',
-    'topic:wcag sort:stars-desc',
-    'topic:web-accessibility sort:stars-desc',
+    // 🎯 Projetos web que IMPLEMENTAM acessibilidade
+    'axe topic:web topic:accessibility sort:stars-desc',
+    'pa11y topic:web topic:accessibility sort:stars-desc', 
+    'lighthouse topic:web topic:accessibility sort:stars-desc',
+    'accessibility testing topic:web sort:stars-desc',
     
-    // Queries de descrição/readme - mais flexíveis
-    'accessibility testing in:name,description,readme sort:stars-desc',
-    'web accessibility in:name,description,readme sort:stars-desc',
-    'accessibility automation in:name,description,readme sort:stars-desc',
-    'accessibility audit in:name,description,readme sort:stars-desc',
-    'accessibility tools in:name,description,readme sort:stars-desc',
+    // 💻 Aplicações React/Vue/Angular com acessibilidade
+    'axe topic:react language:JavaScript sort:stars-desc',
+    'axe topic:vue language:JavaScript sort:stars-desc',
+    'axe topic:angular language:JavaScript sort:stars-desc',
+    'pa11y topic:react language:JavaScript sort:stars-desc',
+    'pa11y topic:vue language:JavaScript sort:stars-desc',
+    'lighthouse topic:react language:JavaScript sort:stars-desc',
     
-    // Queries específicas por ferramenta
-    'axe testing sort:stars-desc',
-    'pa11y testing sort:stars-desc', 
-    'lighthouse accessibility sort:stars-desc',
-    'wave automated testing sort:stars-desc',
+    // 🏗️ Projetos frontend com CI/CD de acessibilidade  
+    'axe ci frontend in:name,description,readme language:JavaScript sort:stars-desc',
+    'pa11y ci frontend in:name,description,readme language:JavaScript sort:stars-desc',
+    'lighthouse ci frontend in:name,description,readme language:JavaScript sort:stars-desc',
+    'accessibility testing ci in:name,description,readme language:JavaScript sort:stars-desc',
     
-    // Queries adicionais
-    'aria testing sort:stars-desc',
-    'screen reader testing sort:stars-desc',
-    'accessibility compliance sort:stars-desc'
+    // 🔧 Websites e web apps com automação de acessibilidade
+    'axe website in:name,description,readme language:JavaScript sort:stars-desc',
+    'pa11y webapp in:name,description,readme language:JavaScript sort:stars-desc',
+    'lighthouse website in:name,description,readme language:JavaScript sort:stars-desc',
+    'accessibility automation website in:name,description,readme sort:stars-desc',
+    
+    // 🎨 Projetos específicos de UI/UX com acessibilidade
+    'axe ui component library sort:stars-desc',
+    'accessibility ui components sort:stars-desc',
+    'pa11y design system sort:stars-desc',
+    'lighthouse pwa sort:stars-desc',
+    
+    // 🌍 Sites governamentais e educacionais (alta chance de ter acessibilidade)
+    'accessibility gov website sort:stars-desc',
+    'accessibility education website sort:stars-desc',
+    'wcag compliance website sort:stars-desc'
   ];
 
   for (const queryString of queryStrings) {
@@ -211,12 +225,42 @@ async function main() {
             continue;
           }
 
-          // Remove filtro de estrelas que estava muito restritivo
-          // Agora aceita qualquer número de estrelas
+          // Filtro inteligente para priorizar aplicações web
+          const repoName = repo.name.toLowerCase();
+          const ownerName = repo.owner.login.toLowerCase();
+          
+          // Indicadores de que é uma aplicação web (PRIORIDADE ALTA)
+          const webAppIndicators = [
+            'website', 'webapp', 'app', 'frontend', 'ui', 'dashboard', 
+            'portal', 'platform', 'site', 'web', 'client', 'interface'
+          ];
+          
+          // Indicadores de que é framework/biblioteca (PRIORIDADE BAIXA para nosso objetivo)  
+          const libraryIndicators = [
+            'axe-core', 'pa11y', 'lighthouse', 'wave', 'lib', 'library', 
+            'framework', 'plugin', 'util', 'tool', 'helper'
+          ];
+          
+          const isWebApp = webAppIndicators.some(indicator => 
+            repoName.includes(indicator) || ownerName.includes(indicator)
+          );
+          
+          const isLibrary = libraryIndicators.some(indicator => 
+            repoName.includes(indicator)
+          );
+          
+          // Prioriza web apps, mas não exclui totalmente libraries (podem ser úteis)
+          if (isLibrary && !isWebApp && queryAnalyzed > 20) {
+            console.log(`⏭️  Priorizando web apps: ${nameWithOwner} (parece ser biblioteca)`);
+            continue;
+          }
+          
           processedRepos.add(nameWithOwner);
           queryAnalyzed++;
+          totalAnalyzed++; // Incrementa contador global
 
-          console.log(`🔍 Analisando (${queryAnalyzed}): ${nameWithOwner} (${repo.stargazerCount}⭐)`);
+          const appType = isWebApp ? '🌐 [WEB APP]' : isLibrary ? '📚 [LIBRARY]' : '❓ [OTHER]';
+          console.log(`🔍 Analisando (${queryAnalyzed}): ${appType} ${nameWithOwner} (${repo.stargazerCount}⭐)`);
 
           const wf = await checkWorkflows(repo.owner.login, repo.name);
           const dep = await checkDependencies(repo.owner.login, repo.name);
@@ -258,18 +302,23 @@ async function main() {
       }
     }
 
-    console.log(`📊 Query finalizada: "${queryString.substring(0, 40)}..." | Encontrados: ${queryFound} | Analisados: ${queryAnalyzed}`);
+    console.log(`📊 Query finalizada: "${queryString.substring(0, 40)}..."`);
+    console.log(`   └─ Encontrados nesta query: ${queryFound}`);
+    console.log(`   └─ Analisados nesta query: ${queryAnalyzed}`);
+    console.log(`   └─ Taxa de sucesso da query: ${queryAnalyzed > 0 ? ((queryFound / queryAnalyzed) * 100).toFixed(1) : 0}%`);
     
     // Pausa entre queries
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
   console.log(`\n🎉 ===== RESUMO FINAL DETALHADO ===== 🎉`);
-  console.log(`📊 Total de repositórios únicos analisados: ${processedRepos.size}`);
+  console.log(`🔢 Total de repositórios processados (todas as queries): ${totalAnalyzed}`);
+  console.log(`📊 Total de repositórios únicos analisados (sem duplicatas): ${processedRepos.size}`);
   console.log(`✅ Total de repositórios com ferramentas de acessibilidade: ${totalFound}`);
-  console.log(`📈 Taxa de sucesso: ${processedRepos.size > 0 ? ((totalFound / processedRepos.size) * 100).toFixed(2) : 0}%`);
-  console.log(`📁 Arquivo CSV gerado: ${csvPath}`);
+  console.log(`📈 Taxa de sucesso (repos com ferramentas / únicos analisados): ${processedRepos.size > 0 ? ((totalFound / processedRepos.size) * 100).toFixed(2) : 0}%`);
+  console.log(`🎯 Taxa de eficiência (únicos / processados): ${totalAnalyzed > 0 ? ((processedRepos.size / totalAnalyzed) * 100).toFixed(2) : 0}%`);
   console.log(`🔍 Total de queries executadas: ${queryStrings.length}`);
+  console.log(`📁 Arquivo CSV gerado: ${csvPath}`);
   console.log(`=====================================\n`);
   console.log('🏁 Processo finalizado!');
 }
