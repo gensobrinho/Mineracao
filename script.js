@@ -174,8 +174,20 @@ async function main() {
   let totalFound = 0;
   let totalAnalyzed = 0; // Contador total de repositórios analisados
   let after = null;
-  const batchSize = 100; // Aumentado para mais eficiência
+  const batchSize = 100; // Máximo permitido pela API do GitHub
   const processedRepos = new Set(); // Para evitar duplicados
+
+  console.log(`🚀 INICIANDO ANÁLISE GERAL SEM LIMITAÇÕES!`);
+  console.log(`⚡ ATENÇÃO: Este processo pode demorar HORAS para completar`);
+  console.log(
+    `📊 Cada faixa será processada COMPLETAMENTE (sem limite de 500 repos)`
+  );
+  console.log(
+    `🔄 O script continuará até esgotar todos os repositórios de cada faixa`
+  );
+  console.log(`⏰ Tempo estimado: 2-8 horas dependendo da API do GitHub\n`);
+
+  const startTime = Date.now();
 
   // 🌟 ESTRATÉGIA GERAL: TODOS os repositórios por faixas exclusivas de estrelas
   const starRanges = [
@@ -241,12 +253,15 @@ async function main() {
     console.log(`\n🌟 ===== FAIXA: ${rangeName.toUpperCase()} =====`);
     console.log(`🔍 Query: "${queryString}"`);
 
-    // Cada faixa roda até o final ou até 500 resultados
-    while (queryFound < 500) {
+    // Cada faixa roda até o final (SEM LIMITAÇÃO)
+    while (true) {
       const variables = { queryString, first: batchSize, after };
       console.log(`📊 Processando repositórios da faixa "${rangeName}"...`);
       console.log(
-        `   Encontrados com ferramentas nesta faixa: ${queryFound} | Total geral: ${totalFound}`
+        `   🎯 Com ferramentas nesta faixa: ${queryFound} | 📊 Total geral: ${totalFound}`
+      );
+      console.log(
+        `   🔍 Analisados nesta faixa: ${queryAnalyzed} | 🌟 Total analisados: ${totalAnalyzed}`
       );
 
       try {
@@ -373,7 +388,17 @@ async function main() {
   );
 
   // Resumo geral
+  const endTime = Date.now();
+  const totalTimeMs = endTime - startTime;
+  const totalTimeMin = Math.round(totalTimeMs / 60000);
+  const totalTimeHour = Math.round(totalTimeMin / 60);
+  const timeDisplay =
+    totalTimeMin > 60
+      ? `${totalTimeHour}h ${totalTimeMin % 60}min`
+      : `${totalTimeMin}min`;
+
   console.log(`📊 RESUMO GERAL:`);
+  console.log(`⏰ Tempo total de execução: ${timeDisplay}`);
   console.log(`🔢 Total de repositórios processados: ${totalAnalyzed}`);
   console.log(`📊 Repositórios únicos analisados: ${processedRepos.size}`);
   console.log(
@@ -392,6 +417,9 @@ async function main() {
         ? ((processedRepos.size / totalAnalyzed) * 100).toFixed(2)
         : 0
     }%`
+  );
+  console.log(
+    `⚡ Velocidade: ${Math.round(totalAnalyzed / totalTimeMin)} repos/min`
   );
   console.log(`🔍 Faixas de estrelas analisadas: ${starRanges.length}`);
   console.log(`📁 Arquivo CSV: ${csvPath}\n`);
