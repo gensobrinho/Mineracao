@@ -177,52 +177,76 @@ async function main() {
   const batchSize = 100; // Aumentado para mais eficiência
   const processedRepos = new Set(); // Para evitar duplicados
 
-  const queryStrings = [
-    // 🌟 Repositórios mais populares em geral (ordenados por estrelas)
-    "stars:>1000 sort:stars-desc",
-    "stars:>500 sort:stars-desc",
-    "stars:>100 sort:stars-desc",
-    "stars:>50 sort:stars-desc",
-    "stars:>10 sort:stars-desc",
-
-    // 💻 Repositórios populares por linguagem (mais propensos a ter web apps)
-    "language:JavaScript stars:>100 sort:stars-desc",
-    "language:TypeScript stars:>100 sort:stars-desc",
-    "language:HTML stars:>50 sort:stars-desc",
-    "language:CSS stars:>50 sort:stars-desc",
-
-    // 🌐 Repositórios web populares por tópico
-    "topic:web stars:>50 sort:stars-desc",
-    "topic:website stars:>50 sort:stars-desc",
-    "topic:webapp stars:>50 sort:stars-desc",
-    "topic:frontend stars:>50 sort:stars-desc",
-    "topic:react stars:>100 sort:stars-desc",
-    "topic:vue stars:>100 sort:stars-desc",
-    "topic:angular stars:>100 sort:stars-desc",
-    "topic:nodejs stars:>100 sort:stars-desc",
-
-    // 📱 Repositórios de aplicações/plataformas populares
-    "topic:app stars:>50 sort:stars-desc",
-    "topic:application stars:>50 sort:stars-desc",
-    "topic:platform stars:>50 sort:stars-desc",
-    "topic:dashboard stars:>50 sort:stars-desc",
-    "topic:ui stars:>50 sort:stars-desc",
-    "topic:pwa stars:>50 sort:stars-desc",
+  // 🌟 ESTRATÉGIA GERAL: TODOS os repositórios por faixas exclusivas de estrelas
+  const starRanges = [
+    {
+      query: "stars:>=10000 sort:stars-desc",
+      name: "10.000+ estrelas",
+      min: 10000,
+      max: null,
+    },
+    {
+      query: "stars:5000..9999 sort:stars-desc",
+      name: "5.000-9.999 estrelas",
+      min: 5000,
+      max: 9999,
+    },
+    {
+      query: "stars:1000..4999 sort:stars-desc",
+      name: "1.000-4.999 estrelas",
+      min: 1000,
+      max: 4999,
+    },
+    {
+      query: "stars:500..999 sort:stars-desc",
+      name: "500-999 estrelas",
+      min: 500,
+      max: 999,
+    },
+    {
+      query: "stars:100..499 sort:stars-desc",
+      name: "100-499 estrelas",
+      min: 100,
+      max: 499,
+    },
+    {
+      query: "stars:50..99 sort:stars-desc",
+      name: "50-99 estrelas",
+      min: 50,
+      max: 99,
+    },
+    {
+      query: "stars:10..49 sort:stars-desc",
+      name: "10-49 estrelas",
+      min: 10,
+      max: 49,
+    },
+    {
+      query: "stars:1..9 sort:stars-desc",
+      name: "1-9 estrelas",
+      min: 1,
+      max: 9,
+    },
   ];
 
-  for (const queryString of queryStrings) {
+  // Estatísticas por faixa de estrelas
+  const rangeStats = new Map();
+
+  for (const range of starRanges) {
+    const { query: queryString, name: rangeName } = range;
     after = null;
     let queryFound = 0;
     let queryAnalyzed = 0;
-    console.log(`\n🔍 Buscando repositórios populares: "${queryString}"`);
 
-    // Cada query roda até o final ou até 500 resultados por query
+    console.log(`\n🌟 ===== FAIXA: ${rangeName.toUpperCase()} =====`);
+    console.log(`🔍 Query: "${queryString}"`);
+
+    // Cada faixa roda até o final ou até 500 resultados
     while (queryFound < 500) {
       const variables = { queryString, first: batchSize, after };
-      console.log(`📊 Processando lote de repositórios populares...`);
-      console.log(`   Query: "${queryString.substring(0, 40)}..."`);
+      console.log(`📊 Processando repositórios da faixa "${rangeName}"...`);
       console.log(
-        `   Encontrados com ferramentas nesta query: ${queryFound} | Total geral: ${totalFound}`
+        `   Encontrados com ferramentas nesta faixa: ${queryFound} | Total geral: ${totalFound}`
       );
 
       try {
@@ -312,64 +336,91 @@ async function main() {
       }
     }
 
+    // Salva estatísticas da faixa
+    rangeStats.set(rangeName, {
+      found: queryFound,
+      analyzed: queryAnalyzed,
+      range: range,
+    });
+
+    console.log(`🎯 ===== FAIXA "${rangeName.toUpperCase()}" FINALIZADA =====`);
     console.log(
-      `📊 Query de repositórios populares finalizada: "${queryString.substring(
-        0,
-        40
-      )}..."`
+      `   📊 Repositórios COM ferramentas encontrados: ${queryFound}`
     );
+    console.log(`   🔍 Repositórios analisados nesta faixa: ${queryAnalyzed}`);
     console.log(
-      `   └─ Repositórios COM ferramentas encontrados: ${queryFound}`
-    );
-    console.log(`   └─ Repositórios populares analisados: ${queryAnalyzed}`);
-    console.log(
-      `   └─ Taxa de repositórios com acessibilidade: ${
+      `   📈 Taxa de acessibilidade na faixa: ${
         queryAnalyzed > 0 ? ((queryFound / queryAnalyzed) * 100).toFixed(1) : 0
       }%`
     );
+    console.log(
+      `   ⭐ Faixa de estrelas: ${range.min}${
+        range.max ? `-${range.max}` : "+"
+      }`
+    );
+    console.log(`============================================`);
 
     // Pausa entre queries
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
+  console.log(`\n🎉 ===== ANÁLISE GERAL DE REPOSITÓRIOS FINALIZADA ===== 🎉`);
   console.log(
-    `\n🎉 ===== ANÁLISE DE REPOSITÓRIOS POPULARES FINALIZADA ===== 🎉`
+    `🌟 ESTRATÉGIA: Análise GERAL de TODOS os repositórios por faixa de estrelas`
   );
   console.log(
-    `🌟 ESTRATÉGIA: Buscar repositórios populares e verificar se usam ferramentas de acessibilidade`
+    `===============================================================\n`
+  );
+
+  // Resumo geral
+  console.log(`📊 RESUMO GERAL:`);
+  console.log(`🔢 Total de repositórios processados: ${totalAnalyzed}`);
+  console.log(`📊 Repositórios únicos analisados: ${processedRepos.size}`);
+  console.log(
+    `✅ Repositórios que USAM ferramentas de acessibilidade: ${totalFound}`
   );
   console.log(
-    `🔢 Total de repositórios populares processados (todas as queries): ${totalAnalyzed}`
-  );
-  console.log(
-    `📊 Repositórios únicos analisados (sem duplicatas): ${processedRepos.size}`
-  );
-  console.log(
-    `✅ Repositórios populares que USAM ferramentas de acessibilidade: ${totalFound}`
-  );
-  console.log(
-    `📈 Taxa de adoção de acessibilidade (repos com ferramentas / únicos): ${
+    `📈 Taxa global de adoção de acessibilidade: ${
       processedRepos.size > 0
         ? ((totalFound / processedRepos.size) * 100).toFixed(2)
         : 0
     }%`
   );
   console.log(
-    `🎯 Taxa de eficiência (únicos / processados): ${
+    `🎯 Taxa de eficiência (únicos/processados): ${
       totalAnalyzed > 0
         ? ((processedRepos.size / totalAnalyzed) * 100).toFixed(2)
         : 0
     }%`
   );
+  console.log(`🔍 Faixas de estrelas analisadas: ${starRanges.length}`);
+  console.log(`📁 Arquivo CSV: ${csvPath}\n`);
+
+  // Detalhamento por faixa
+  console.log(`🌟 DETALHAMENTO POR FAIXA DE ESTRELAS:`);
+  console.log(`${"".padEnd(70, "=")}`);
+  for (const [faixaNome, stats] of rangeStats) {
+    const taxa =
+      stats.analyzed > 0
+        ? ((stats.found / stats.analyzed) * 100).toFixed(1)
+        : "0.0";
+    const range = stats.range;
+    const faixaEstrelas = `${range.min}${range.max ? `-${range.max}` : "+"}`;
+
+    console.log(
+      `⭐ ${faixaNome.padEnd(20)} | Estrelas: ${faixaEstrelas.padEnd(
+        12
+      )} | Analisados: ${stats.analyzed
+        .toString()
+        .padStart(4)} | Com ferramentas: ${stats.found
+        .toString()
+        .padStart(3)} | Taxa: ${taxa.padStart(5)}%`
+    );
+  }
+
+  console.log(`${"".padEnd(70, "=")}`);
   console.log(
-    `🔍 Queries de repositórios populares executadas: ${queryStrings.length}`
-  );
-  console.log(`📁 Arquivo CSV com repositórios encontrados: ${csvPath}`);
-  console.log(
-    `=================================================================\n`
-  );
-  console.log(
-    "🏁 Análise concluída! Agora você pode executar as ferramentas nos repositórios encontrados."
+    `🏁 Análise completa! Execute o script de ferramentas nos repos encontrados.`
   );
 }
 
