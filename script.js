@@ -26,6 +26,101 @@ const appendToCSV = (row) => {
   fs.appendFileSync(csvPath, line);
 };
 
+// Detecção ampliada de ferramentas e CSV detalhado
+const detailedCsvPath = "repositorios_acessibilidade_detalhado.csv";
+const writeDetailedHeader = () => {
+  if (!fs.existsSync(detailedCsvPath)) {
+    fs.writeFileSync(
+      detailedCsvPath,
+      "Repositório,Estrelas,FerramentasWorkflow,FerramentasDependencias\n"
+    );
+  }
+};
+
+const appendToDetailedCSV = (row) => {
+  const sanitize = (s) => String(s ?? "").replace(/"/g, '""');
+  const wf = sanitize(row.wfTools);
+  const dep = sanitize(row.depTools);
+  const line = `"${sanitize(row.nameWithOwner)}",${
+    row.stars
+  },"${wf}","${dep}"\n`;
+  fs.appendFileSync(detailedCsvPath, line);
+};
+
+// Lista de ferramentas conhecidas e termos de detecção
+const KNOWN_TOOLS = [
+  {
+    name: "axe-core",
+    tokens: [
+      "@axe-core/cli",
+      "axe-core",
+      "axe-playwright",
+      "axe-puppeteer",
+      "axe-webdriverjs",
+      "axe-selenium",
+      "react-axe",
+      "@axe-core/react",
+      "jest-axe",
+      "cypress-axe",
+    ],
+  },
+  { name: "pa11y", tokens: ["pa11y", "pa11y-ci"] },
+  { name: "lighthouse", tokens: ["lighthouse", "lighthouse-ci", "lhci"] },
+  { name: "wave", tokens: ["wave", "webaim"] },
+  {
+    name: "html-codesniffer",
+    tokens: [
+      "html_codesniffer",
+      "html-codesniffer",
+      "htmlcs",
+      "squizlabs/html_codesniffer",
+    ],
+  },
+  {
+    name: "accessibility-checker",
+    tokens: ["accessibility-checker", "ibm equal access", "ibm accessibility"],
+  },
+  { name: "webhint", tokens: ["webhint", "@hint/cli", "hint"] },
+  {
+    name: "nu-html-checker",
+    tokens: ["vnu", "nu html checker", "html-validator", "htmlvalidator"],
+  },
+  { name: "html-validate", tokens: ["html-validate"] },
+  {
+    name: "eslint-plugin-jsx-a11y",
+    tokens: ["eslint-plugin-jsx-a11y", "jsx-a11y"],
+  },
+  {
+    name: "eslint-plugin-vuejs-accessibility",
+    tokens: ["eslint-plugin-vuejs-accessibility", "vue-a11y"],
+  },
+  { name: "stylelint-a11y", tokens: ["stylelint-a11y"] },
+  { name: "ember-a11y-testing", tokens: ["ember-a11y-testing"] },
+  {
+    name: "storybook-addon-a11y",
+    tokens: ["@storybook/addon-a11y", "addon-a11y"],
+  },
+  {
+    name: "accessibility-insights-action",
+    tokens: ["accessibility-insights-action"],
+  },
+  { name: "accesslint", tokens: ["accesslint"] },
+  { name: "tota11y", tokens: ["tota11y"] },
+];
+
+const detectToolsInText = (textLower) => {
+  const found = new Set();
+  for (const tool of KNOWN_TOOLS) {
+    for (const token of tool.tokens) {
+      if (textLower.includes(token)) {
+        found.add(tool.name);
+        break;
+      }
+    }
+  }
+  return Array.from(found).sort();
+};
+
 async function graphqlRequest(query, variables) {
   const response = await fetch("https://api.github.com/graphql", {
     method: "POST",
@@ -66,6 +161,7 @@ async function checkWorkflows(owner, repo) {
     pa11y = false,
     lighthouse = false,
     wave = false;
+  let wfToolsList = [];
 
   try {
     const response = await fetchWithTimeout(url, {
@@ -96,12 +192,17 @@ async function checkWorkflows(owner, repo) {
           if (workflowContent.includes("pa11y")) pa11y = true;
           if (workflowContent.includes("lighthouse")) lighthouse = true;
           if (workflowContent.includes("wave")) wave = true;
+          // Detecção ampliada no conteúdo do workflow
+          const detected = detectToolsInText(workflowContent);
+          if (detected.length) {
+            wfToolsList = Array.from(new Set([...wfToolsList, ...detected]));
+          }
         } catch (error) {}
       }
     }
-    return { axe, pa11y, lighthouse, wave };
+    return { axe, pa11y, lighthouse, wave, wfToolsList };
   } catch (error) {
-    return { axe, pa11y, lighthouse, wave };
+    return { axe, pa11y, lighthouse, wave, wfToolsList };
   }
 }
 
@@ -116,6 +217,7 @@ async function checkDependencies(owner, repo) {
     pa11y = false,
     lighthouse = false,
     wave = false;
+  let depToolsList = [];
 
   for (const fileName of dependencyFiles) {
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
@@ -142,10 +244,15 @@ async function checkDependencies(owner, repo) {
         if (content.includes("pa11y")) pa11y = true;
         if (content.includes("lighthouse")) lighthouse = true;
         if (content.includes("wave")) wave = true;
+        // Detecção ampliada no conteúdo de dependências
+        const detected = detectToolsInText(content);
+        if (detected.length) {
+          depToolsList = Array.from(new Set([...depToolsList, ...detected]));
+        }
       }
     } catch (error) {}
   }
-  return { axe, pa11y, lighthouse, wave };
+  return { axe, pa11y, lighthouse, wave, depToolsList };
 }
 
 const searchRepositoriesQuery = `
@@ -171,6 +278,7 @@ query($queryString: String!, $first: Int!, $after: String) {
 
 async function main() {
   writeHeader();
+  writeDetailedHeader();
   let totalFound = 0;
   let totalAnalyzed = 0; // Contador total de repositórios analisados
   let after = null;
@@ -318,6 +426,13 @@ async function main() {
               pa11y_dep: dep.pa11y ? "Sim" : "Não",
               lighthouse_dep: dep.lighthouse ? "Sim" : "Não",
               wave_dep: dep.wave ? "Sim" : "Não",
+            });
+            // CSV detalhado com lista de ferramentas detectadas
+            appendToDetailedCSV({
+              nameWithOwner,
+              stars: repo.stargazerCount,
+              wfTools: (wf.wfToolsList || []).join(", "),
+              depTools: (dep.depToolsList || []).join(", "),
             });
             queryFound++;
             totalFound++;
