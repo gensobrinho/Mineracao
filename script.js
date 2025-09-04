@@ -373,49 +373,49 @@ async function main() {
   // 🌟 ESTRATÉGIA GERAL: TODOS os repositórios por faixas exclusivas de estrelas
   const starRanges = [
     {
-      query: "stars:>=10000 sort:stars-desc",
+      query: "topic:web stars:>=10000 sort:stars-desc",
       name: "10.000+ estrelas",
       min: 10000,
       max: null,
     },
     {
-      query: "stars:5000..9999 sort:stars-desc",
+      query: "topic:web stars:5000..9999 sort:stars-desc",
       name: "5.000-9.999 estrelas",
       min: 5000,
       max: 9999,
     },
     {
-      query: "stars:1000..4999 sort:stars-desc",
+      query: "topic:web stars:1000..4999 sort:stars-desc",
       name: "1.000-4.999 estrelas",
       min: 1000,
       max: 4999,
     },
     {
-      query: "stars:500..999 sort:stars-desc",
+      query: "topic:web stars:500..999 sort:stars-desc",
       name: "500-999 estrelas",
       min: 500,
       max: 999,
     },
     {
-      query: "stars:100..499 sort:stars-desc",
+      query: "topic:web stars:100..499 sort:stars-desc",
       name: "100-499 estrelas",
       min: 100,
       max: 499,
     },
     {
-      query: "stars:50..99 sort:stars-desc",
+      query: "topic:web stars:50..99 sort:stars-desc",
       name: "50-99 estrelas",
       min: 50,
       max: 99,
     },
     {
-      query: "stars:10..49 sort:stars-desc",
+      query: "topic:web stars:10..49 sort:stars-desc",
       name: "10-49 estrelas",
       min: 10,
       max: 49,
     },
     {
-      query: "stars:1..9 sort:stars-desc",
+      query: "topic:web stars:1..9 sort:stars-desc",
       name: "1-9 estrelas",
       min: 1,
       max: 9,
