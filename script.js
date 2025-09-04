@@ -276,6 +276,79 @@ query($queryString: String!, $first: Int!, $after: String) {
 }
 `;
 
+// Utilidades de divisão por data para ultrapassar o limite de 1000 resultados por query
+function formatDate(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+async function getRepositoryCount(queryString) {
+  const variables = { queryString, first: 1, after: null };
+  const data = await graphqlRequest(searchRepositoriesQuery, variables);
+  return data.search.repositoryCount || 0;
+}
+
+function buildStarsQuery(range) {
+  if (range.max == null) return `stars:>=${range.min}`;
+  return `stars:${range.min}..${range.max}`;
+}
+
+async function splitRangeByDateUntilUnderLimit(
+  range,
+  startDate,
+  endDate,
+  maxPerQuery = 1000,
+  depth = 0
+) {
+  const starsPart = buildStarsQuery(range);
+  const queryString = `${starsPart} pushed:${formatDate(
+    startDate
+  )}..${formatDate(endDate)} sort:stars-desc`;
+  const count = await getRepositoryCount(queryString);
+
+  if (count <= maxPerQuery) {
+    return [{ queryString, rangeName: range.name, count }];
+  }
+
+  // Evita recursão infinita: se janela de 1 dia ainda for > 1000, retorna mesmo assim
+  const msPerDay = 24 * 60 * 60 * 1000;
+  if (endDate - startDate <= msPerDay) {
+    return [{ queryString, rangeName: range.name, count }];
+  }
+
+  // Divide pela metade do período
+  const midTime =
+    startDate.getTime() +
+    Math.floor((endDate.getTime() - startDate.getTime()) / 2);
+  const midDate = new Date(midTime);
+
+  const left = await splitRangeByDateUntilUnderLimit(
+    range,
+    startDate,
+    midDate,
+    maxPerQuery,
+    depth + 1
+  );
+  const rightStart = new Date(midDate.getTime() + msPerDay);
+  const right = await splitRangeByDateUntilUnderLimit(
+    range,
+    rightStart,
+    endDate,
+    maxPerQuery,
+    depth + 1
+  );
+  return [...left, ...right];
+}
+
+async function buildSubQueriesForRange(range) {
+  // Varre desde 2008-01-01 (início do GitHub público) até hoje
+  const start = new Date(Date.UTC(2008, 0, 1));
+  const end = new Date();
+  return await splitRangeByDateUntilUnderLimit(range, start, end, 1000);
+}
+
 async function main() {
   writeHeader();
   writeDetailedHeader();
