@@ -10,7 +10,7 @@ if (!GITHUB_TOKEN) {
   process.exit(1);
 }
 
-const csvPath = "bibliotecas_acessibilidade.csv";
+const csvPath = "repositorios_acessibilidade.csv";
 
 function writeHeader() {
   if (!fs.existsSync(csvPath)) {
