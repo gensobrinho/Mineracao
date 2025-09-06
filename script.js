@@ -266,20 +266,29 @@ async function processQuery(queryString, processedSet) {
         checkToolInDependencies(repo.owner.login, repo.name)
       ]);
 
-      appendToCSV({
-        repo: nameWithOwner,
-        stars: repo.stargazerCount,
-        hasAxeWorkflow: workflowCheck.hasAxe ? "Sim" : "Não",
-        hasAxeDeps: depsCheck.hasAxe ? "Sim" : "Não",
-        hasPa11yWorkflow: workflowCheck.hasPa11y ? "Sim" : "Não",
-        hasPa11yDeps: depsCheck.hasPa11y ? "Sim" : "Não",
-        hasWaveDeps: depsCheck.hasWave ? "Sim" : "Não",
-        hasWaveWorkflow: workflowCheck.hasWave ? "Sim" : "Não",
-      });
-      processedSet.add(nameWithOwner);
-      saved++;
-      
-      console.log(`✅ REPOSITÓRIO ADICIONADO: ${nameWithOwner} (${repo.stargazerCount} ⭐)`);
+      // Verificar se tem pelo menos uma ferramenta de acessibilidade
+      const hasAnyTool = workflowCheck.hasAxe || workflowCheck.hasPa11y || workflowCheck.hasWave || 
+                        depsCheck.hasAxe || depsCheck.hasPa11y || depsCheck.hasWave;
+
+      if (hasAnyTool) {
+        appendToCSV({
+          repo: nameWithOwner,
+          stars: repo.stargazerCount,
+          hasAxeWorkflow: workflowCheck.hasAxe ? "Sim" : "Não",
+          hasAxeDeps: depsCheck.hasAxe ? "Sim" : "Não",
+          hasPa11yWorkflow: workflowCheck.hasPa11y ? "Sim" : "Não",
+          hasPa11yDeps: depsCheck.hasPa11y ? "Sim" : "Não",
+          hasWaveDeps: depsCheck.hasWave ? "Sim" : "Não",
+          hasWaveWorkflow: workflowCheck.hasWave ? "Sim" : "Não",
+        });
+        processedSet.add(nameWithOwner);
+        saved++;
+        
+        console.log(`✅ REPOSITÓRIO ADICIONADO: ${nameWithOwner} (${repo.stargazerCount} ⭐)`);
+      } else {
+        console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - Nenhuma ferramenta de acessibilidade encontrada`);
+        processedSet.add(nameWithOwner); // Marcar como processado para não verificar novamente
+      }
       
       // Pequena pausa para evitar rate limiting
       await new Promise((r) => setTimeout(r, 100));
@@ -305,6 +314,7 @@ async function main() {
   );
   console.log(`📋 Total de queries: ${queries.length}`);
   console.log("🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste");
+  console.log("🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y ou WAVE serão salvos");
 
   for (const q of queries) {
     console.log(`\n🔎 Query: ${q}`);
