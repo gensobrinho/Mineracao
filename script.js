@@ -189,7 +189,7 @@ query($queryString: String!, $first: Int!, $after: String) {
 }
 `;
 
-// Busca expandida por projetos web que podem usar ferramentas de acessibilidade
+// Busca focada em projetos frontend e acessibilidade web
 function buildQueries() {
   const queries = [];
   
@@ -201,52 +201,40 @@ function buildQueries() {
   queries.push("wave-web-aim in:name,description,readme sort:stars-desc");
   queries.push("webaim-wave in:name,description,readme sort:stars-desc");
   
-  // // 2. Projetos web por linguagem principal
+  // // 2. Linguagens frontend
   // queries.push("language:javascript in:name,description sort:stars-desc");
   // queries.push("language:typescript in:name,description sort:stars-desc");
   // queries.push("language:html in:name,description sort:stars-desc");
   // queries.push("language:css in:name,description sort:stars-desc");
-  // queries.push("language:python in:name,description sort:stars-desc");
-  // queries.push("language:php in:name,description sort:stars-desc");
-  // queries.push("language:java in:name,description sort:stars-desc");
-  // queries.push("language:csharp in:name,description sort:stars-desc");
   
-  // // 3. Frameworks e bibliotecas web populares
+  // // 3. Frameworks e bibliotecas frontend
   // queries.push("react in:name,description sort:stars-desc");
   // queries.push("vue in:name,description sort:stars-desc");
   // queries.push("angular in:name,description sort:stars-desc");
   // queries.push("nextjs in:name,description sort:stars-desc");
   // queries.push("nuxt in:name,description sort:stars-desc");
   // queries.push("svelte in:name,description sort:stars-desc");
-  // queries.push("express in:name,description sort:stars-desc");
-  // queries.push("django in:name,description sort:stars-desc");
-  // queries.push("rails in:name,description sort:stars-desc");
-  // queries.push("laravel in:name,description sort:stars-desc");
-  // queries.push("spring-boot in:name,description sort:stars-desc");
-  // queries.push("aspnet in:name,description sort:stars-desc");
+  // queries.push("gatsby in:name,description sort:stars-desc");
+  // queries.push("astro in:name,description sort:stars-desc");
   
-  // 4. Termos relacionados a desenvolvimento web
+  // 4. Termos relacionados a desenvolvimento frontend/web
   queries.push("web-app in:name,description sort:stars-desc");
   queries.push("website in:name,description sort:stars-desc");
   queries.push("frontend in:name,description sort:stars-desc");
-  queries.push("backend in:name,description sort:stars-desc");
-  queries.push("fullstack in:name,description sort:stars-desc");
   queries.push("spa in:name,description sort:stars-desc");
   queries.push("pwa in:name,description sort:stars-desc");
   queries.push("cms in:name,description sort:stars-desc");
-  queries.push("ecommerce in:name,description sort:stars-desc");
-  queries.push("dashboard in:name,description sort:stars-desc");
-  queries.push("admin-panel in:name,description sort:stars-desc");
-  queries.push("blog in:name,description sort:stars-desc");
+  queries.push("landing-page in:name,description sort:stars-desc");
   
-  // 5. Termos de acessibilidade e UX
+  // 5. Termos de acessibilidade e UX/UI
   queries.push("accessibility in:name,description sort:stars-desc");
   queries.push("a11y in:name,description sort:stars-desc");
   queries.push("wcag in:name,description sort:stars-desc");
+  queries.push("aria in:name,description sort:stars-desc");
   queries.push("ux in:name,description sort:stars-desc");
   queries.push("ui in:name,description sort:stars-desc");
   
-  // 6. Ferramentas de teste e qualidade
+  // 6. Ferramentas de teste e qualidade frontend
   queries.push("testing in:name,description sort:stars-desc");
   
   return queries;
@@ -291,6 +279,8 @@ async function processQuery(queryString, processedSet) {
       processedSet.add(nameWithOwner);
       saved++;
       
+      console.log(`✅ REPOSITÓRIO ADICIONADO: ${nameWithOwner} (${repo.stargazerCount} ⭐)`);
+      
       // Pequena pausa para evitar rate limiting
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -311,10 +301,10 @@ async function main() {
   let totalScanned = 0;
 
   console.log(
-    "🚀 Iniciando coleta expandida de projetos web que podem usar ferramentas de acessibilidade..."
+    "🚀 Iniciando coleta focada em projetos frontend e acessibilidade web..."
   );
   console.log(`📋 Total de queries: ${queries.length}`);
-  console.log("🔍 Escopo: Projetos web, frameworks, ferramentas de teste e projetos de acessibilidade");
+  console.log("🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste");
 
   for (const q of queries) {
     console.log(`\n🔎 Query: ${q}`);
