@@ -34,10 +34,25 @@ async function graphqlRequest(query, variables) {
   });
 
   if (!response.ok) {
-    throw new Error(`Erro na solicitação GraphQL: ${response.statusText}`);
+    const errorText = await response.text();
+    console.error(`❌ Erro HTTP ${response.status}: ${response.statusText}`);
+    console.error(`📄 Resposta: ${errorText}`);
+    throw new Error(`Erro na solicitação GraphQL: ${response.status} ${response.statusText}`);
   }
 
   const data = await response.json();
+  
+  // Debug: verificar se há erros na resposta
+  if (data.errors) {
+    console.error(`❌ Erros GraphQL:`, data.errors);
+    throw new Error(`Erros GraphQL: ${data.errors.map(e => e.message).join(', ')}`);
+  }
+  
+  if (!data.data) {
+    console.error(`❌ Resposta sem data:`, data);
+    throw new Error(`Resposta da API não contém 'data'`);
+  }
+  
   return data.data;
 }
 
@@ -248,9 +263,19 @@ async function processQuery(queryString, processedSet) {
 
   while (true) {
     const variables = { queryString, first, after };
-    const data = await graphqlRequest(searchRepositoriesQuery, variables);
-    const edges = data.search.edges || [];
-    if (edges.length === 0) break;
+    
+    try {
+      const data = await graphqlRequest(searchRepositoriesQuery, variables);
+      
+      // Verificar se a resposta tem a estrutura esperada
+      if (!data || !data.search) {
+        console.error(`❌ Resposta inválida para query: ${queryString}`);
+        console.error(`📄 Data recebida:`, data);
+        break;
+      }
+      
+      const edges = data.search.edges || [];
+      if (edges.length === 0) break;
 
     for (const edge of edges) {
       const repo = edge.node;
@@ -296,6 +321,13 @@ async function processQuery(queryString, processedSet) {
 
     if (!data.search.pageInfo.hasNextPage) break;
     after = data.search.pageInfo.endCursor;
+    
+    } catch (error) {
+      console.error(`❌ Erro ao processar query "${queryString}": ${error.message}`);
+      console.log(`⏳ Aguardando 5 segundos antes de continuar...`);
+      await new Promise((r) => setTimeout(r, 5000));
+      break; // Sair do loop para esta query e tentar a próxima
+    }
   }
 
   return { saved, scanned };
@@ -325,7 +357,7 @@ async function main() {
       console.log(
         `✅ Salvos nesta query: ${saved} | 🔍 Analisados: ${scanned}`
       );
-      await new Promise((r) => setTimeout(r, 750));
+      await new Promise((r) => setTimeout(r, 2000)); // Aumentar pausa para evitar rate limiting
     } catch (e) {
       console.error(`❌ Erro na query: ${e.message}`);
       await new Promise((r) => setTimeout(r, 2000));
