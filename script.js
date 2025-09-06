@@ -12,14 +12,50 @@ if (!GITHUB_TOKEN) {
 
 const csvPath = "repositorios_acessibilidade.csv";
 
+// Configuração de filtros de data
+const DATE_FILTERS = {
+  "1-mes": 1,
+  "3-meses": 3,
+  "6-meses": 6,
+  "1-ano": 12
+};
+
+// Configurar o filtro de data desejado (altere aqui conforme necessário)
+const SELECTED_DATE_FILTER = "1-ano"; // Opções: "1-mes", "3-meses", "6-meses", "1-ano"
+
+// Função para calcular data limite baseada no filtro
+function getDateLimit(monthsAgo) {
+  const now = new Date();
+  const limit = new Date(now.getFullYear(), now.getMonth() - monthsAgo, now.getDate());
+  return limit.toISOString();
+}
+
+// Função para verificar se o repositório está dentro do período
+function isWithinDateRange(commitDate, monthsAgo) {
+  if (!commitDate) return false;
+  
+  const commit = new Date(commitDate);
+  const limit = new Date();
+  limit.setMonth(limit.getMonth() - monthsAgo);
+  
+  return commit >= limit;
+}
+
+// Função para formatar data para exibição
+function formatDate(dateString) {
+  if (!dateString) return "N/A";
+  const date = new Date(dateString);
+  return date.toLocaleDateString('pt-BR');
+}
+
 function writeHeader() {
   if (!fs.existsSync(csvPath)) {
-    fs.writeFileSync(csvPath, "Nome do Repositório,Número de Estrelas,Se há AXE em workflow,Se há AXE em Dependências,Se há Pa11y em Workflow,Se há Pa11y em Dependencias,Se há WAVE em Dependências,Se há WAVE em Workflow\n");
+    fs.writeFileSync(csvPath, "Nome do Repositório,Número de Estrelas,Data do Último Commit,Se há AXE em workflow,Se há AXE em Dependências,Se há Pa11y em Workflow,Se há Pa11y em Dependencias,Se há WAVE em Dependências,Se há WAVE em Workflow\n");
   }
 }
 
 function appendToCSV(row) {
-  const line = `${row.repo},${row.stars},${row.hasAxeWorkflow},${row.hasAxeDeps},${row.hasPa11yWorkflow},${row.hasPa11yDeps},${row.hasWaveDeps},${row.hasWaveWorkflow}\n`;
+  const line = `${row.repo},${row.stars},${row.lastCommit},${row.hasAxeWorkflow},${row.hasAxeDeps},${row.hasPa11yWorkflow},${row.hasPa11yDeps},${row.hasWaveDeps},${row.hasWaveWorkflow}\n`;
   fs.appendFileSync(csvPath, line);
 }
 
@@ -291,14 +327,25 @@ async function processQuery(queryString, processedSet) {
         checkToolInDependencies(repo.owner.login, repo.name)
       ]);
 
+      // Obter data do último commit
+      let lastCommit = repo.pushedAt || "";
+      const target = repo.defaultBranchRef && repo.defaultBranchRef.target;
+      if (target && target.committedDate) {
+        lastCommit = target.committedDate;
+      }
+
       // Verificar se tem pelo menos uma ferramenta de acessibilidade
       const hasAnyTool = workflowCheck.hasAxe || workflowCheck.hasPa11y || workflowCheck.hasWave || 
                         depsCheck.hasAxe || depsCheck.hasPa11y || depsCheck.hasWave;
 
-      if (hasAnyTool) {
+      // Verificar se está dentro do período desejado
+      const isRecent = isWithinDateRange(lastCommit, DATE_FILTERS[SELECTED_DATE_FILTER]);
+
+      if (hasAnyTool && isRecent) {
         appendToCSV({
           repo: nameWithOwner,
           stars: repo.stargazerCount,
+          lastCommit: formatDate(lastCommit),
           hasAxeWorkflow: workflowCheck.hasAxe ? "Sim" : "Não",
           hasAxeDeps: depsCheck.hasAxe ? "Sim" : "Não",
           hasPa11yWorkflow: workflowCheck.hasPa11y ? "Sim" : "Não",
@@ -309,9 +356,13 @@ async function processQuery(queryString, processedSet) {
         processedSet.add(nameWithOwner);
         saved++;
         
-        console.log(`✅ REPOSITÓRIO ADICIONADO: ${nameWithOwner} (${repo.stargazerCount} ⭐)`);
+        console.log(`✅ REPOSITÓRIO ADICIONADO: ${nameWithOwner} (${repo.stargazerCount} ⭐) - Último commit: ${formatDate(lastCommit)}`);
       } else {
-        console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - Nenhuma ferramenta de acessibilidade encontrada`);
+        let reason = "";
+        if (!hasAnyTool) reason = "Nenhuma ferramenta de acessibilidade encontrada";
+        else if (!isRecent) reason = `Último commit muito antigo (${formatDate(lastCommit)})`;
+        
+        console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - ${reason}`);
         processedSet.add(nameWithOwner); // Marcar como processado para não verificar novamente
       }
       
@@ -347,6 +398,7 @@ async function main() {
   console.log(`📋 Total de queries: ${queries.length}`);
   console.log("🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste");
   console.log("🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y ou WAVE serão salvos");
+  console.log(`📅 Filtro de data: Apenas repositórios com commits nos últimos ${SELECTED_DATE_FILTER} (${DATE_FILTERS[SELECTED_DATE_FILTER]} meses)`);
 
   for (const q of queries) {
     console.log(`\n🔎 Query: ${q}`);
