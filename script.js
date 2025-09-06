@@ -14,12 +14,12 @@ const csvPath = "repositorios_acessibilidade.csv";
 
 function writeHeader() {
   if (!fs.existsSync(csvPath)) {
-    fs.writeFileSync(csvPath, "Repositorio,Autor,Estrelas,UltimoCommit\n");
+    fs.writeFileSync(csvPath, "Nome do Repositório,Número de Estrelas,Se há AXE em workflow,Se há AXE em Dependências,Se há Pa11y em Workflow,Se há Pa11y em Dependencias,Se há WAVE em Dependências,Se há WAVE em Workflow\n");
   }
 }
 
 function appendToCSV(row) {
-  const line = `${row.repo},${row.author},${row.stars},${row.lastCommit}\n`;
+  const line = `${row.repo},${row.stars},${row.hasAxeWorkflow},${row.hasAxeDeps},${row.hasPa11yWorkflow},${row.hasPa11yDeps},${row.hasWaveDeps},${row.hasWaveWorkflow}\n`;
   fs.appendFileSync(csvPath, line);
 }
 
@@ -39,6 +39,126 @@ async function graphqlRequest(query, variables) {
 
   const data = await response.json();
   return data.data;
+}
+
+// Query para buscar arquivos de workflow
+const workflowFilesQuery = `
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    object(expression: "HEAD:.github/workflows") {
+      ... on Tree {
+        entries {
+          name
+          object {
+            ... on Blob {
+              text
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+// Query para buscar arquivos de dependências (package.json, requirements.txt, etc.)
+const dependenciesFilesQuery = `
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    packageJson: object(expression: "HEAD:package.json") {
+      ... on Blob {
+        text
+      }
+    }
+    requirementsTxt: object(expression: "HEAD:requirements.txt") {
+      ... on Blob {
+        text
+      }
+    }
+    composerJson: object(expression: "HEAD:composer.json") {
+      ... on Blob {
+        text
+      }
+    }
+    gemfile: object(expression: "HEAD:Gemfile") {
+      ... on Blob {
+        text
+      }
+    }
+  }
+}
+`;
+
+async function checkToolInWorkflows(owner, repoName) {
+  try {
+    const variables = { owner, name: repoName };
+    const data = await graphqlRequest(workflowFilesQuery, variables);
+    
+    if (!data.repository?.object?.entries) {
+      return { hasAxe: false, hasPa11y: false, hasWave: false };
+    }
+
+    let hasAxe = false;
+    let hasPa11y = false;
+    let hasWave = false;
+
+    for (const entry of data.repository.object.entries) {
+      const content = entry.object?.text || "";
+      const lowerContent = content.toLowerCase();
+      
+      if (lowerContent.includes("axe") || lowerContent.includes("axe-core")) {
+        hasAxe = true;
+      }
+      if (lowerContent.includes("pa11y")) {
+        hasPa11y = true;
+      }
+      if (lowerContent.includes("wave") || lowerContent.includes("webaim")) {
+        hasWave = true;
+      }
+    }
+
+    return { hasAxe, hasPa11y, hasWave };
+  } catch (error) {
+    console.log(`Erro ao verificar workflows para ${owner}/${repoName}: ${error.message}`);
+    return { hasAxe: false, hasPa11y: false, hasWave: false };
+  }
+}
+
+async function checkToolInDependencies(owner, repoName) {
+  try {
+    const variables = { owner, name: repoName };
+    const data = await graphqlRequest(dependenciesFilesQuery, variables);
+    
+    let hasAxe = false;
+    let hasPa11y = false;
+    let hasWave = false;
+
+    const files = [
+      data.repository?.packageJson?.text,
+      data.repository?.requirementsTxt?.text,
+      data.repository?.composerJson?.text,
+      data.repository?.gemfile?.text
+    ].filter(Boolean);
+
+    for (const content of files) {
+      const lowerContent = content.toLowerCase();
+      
+      if (lowerContent.includes("axe") || lowerContent.includes("axe-core")) {
+        hasAxe = true;
+      }
+      if (lowerContent.includes("pa11y")) {
+        hasPa11y = true;
+      }
+      if (lowerContent.includes("wave") || lowerContent.includes("webaim")) {
+        hasWave = true;
+      }
+    }
+
+    return { hasAxe, hasPa11y, hasWave };
+  } catch (error) {
+    console.log(`Erro ao verificar dependências para ${owner}/${repoName}: ${error.message}`);
+    return { hasAxe: false, hasPa11y: false, hasWave: false };
+  }
 }
 
 const searchRepositoriesQuery = `
@@ -69,59 +189,66 @@ query($queryString: String!, $first: Int!, $after: String) {
 }
 `;
 
-// Abordagem generalizada (sem lista fixa):
-// Combina termos base de acessibilidade com termos de papel (biblioteca/ferramenta)
-const BASE_TERMS = [
-  "accessibility",
-  "a11y",
-  "wcag",
-  "aria",
-  "inclusive design",
-  "acessibilidade",
-];
-
-const ROLE_TERMS = [
-  "cli",
-  "checker",
-  "validator",
-  "validation",
-  "lint",
-  "linter",
-  "rules",
-  "rule",
-  "plugin",
-  "addon",
-  "extension",
-  "tool",
-  "tooling",
-  "toolkit",
-  "library",
-  "framework",
-  "engine",
-  "testing",
-  "audit",
-  "scanner",
-];
-
+// Busca expandida por projetos web que podem usar ferramentas de acessibilidade
 function buildQueries() {
   const queries = [];
-  for (const b of BASE_TERMS) {
-    for (const r of ROLE_TERMS) {
-      queries.push(`${b} ${r} in:name,description,readme sort:stars-desc`);
-    }
-  }
-  // Pequeno seed para não perder libs amplamente conhecidas (opcional e curto)
-  const SEEDED = [
-    "axe-core",
-    "pa11y",
-    "lighthouse",
-    "html-codesniffer",
-    "webhint",
-    "html-validate",
-  ];
-  for (const s of SEEDED) {
-    queries.push(`${s} in:name,description,readme sort:stars-desc`);
-  }
+  
+  // 1. Busca específica pelas ferramentas de acessibilidade
+  queries.push("axe-core in:name,description,readme sort:stars-desc");
+  queries.push("axe in:name,description,readme sort:stars-desc");
+  queries.push("pa11y in:name,description,readme sort:stars-desc");
+  queries.push("WAVE in:name,description,readme sort:stars-desc");
+  queries.push("wave-web-aim in:name,description,readme sort:stars-desc");
+  queries.push("webaim-wave in:name,description,readme sort:stars-desc");
+  
+  // // 2. Projetos web por linguagem principal
+  // queries.push("language:javascript in:name,description sort:stars-desc");
+  // queries.push("language:typescript in:name,description sort:stars-desc");
+  // queries.push("language:html in:name,description sort:stars-desc");
+  // queries.push("language:css in:name,description sort:stars-desc");
+  // queries.push("language:python in:name,description sort:stars-desc");
+  // queries.push("language:php in:name,description sort:stars-desc");
+  // queries.push("language:java in:name,description sort:stars-desc");
+  // queries.push("language:csharp in:name,description sort:stars-desc");
+  
+  // // 3. Frameworks e bibliotecas web populares
+  // queries.push("react in:name,description sort:stars-desc");
+  // queries.push("vue in:name,description sort:stars-desc");
+  // queries.push("angular in:name,description sort:stars-desc");
+  // queries.push("nextjs in:name,description sort:stars-desc");
+  // queries.push("nuxt in:name,description sort:stars-desc");
+  // queries.push("svelte in:name,description sort:stars-desc");
+  // queries.push("express in:name,description sort:stars-desc");
+  // queries.push("django in:name,description sort:stars-desc");
+  // queries.push("rails in:name,description sort:stars-desc");
+  // queries.push("laravel in:name,description sort:stars-desc");
+  // queries.push("spring-boot in:name,description sort:stars-desc");
+  // queries.push("aspnet in:name,description sort:stars-desc");
+  
+  // 4. Termos relacionados a desenvolvimento web
+  queries.push("web-app in:name,description sort:stars-desc");
+  queries.push("website in:name,description sort:stars-desc");
+  queries.push("frontend in:name,description sort:stars-desc");
+  queries.push("backend in:name,description sort:stars-desc");
+  queries.push("fullstack in:name,description sort:stars-desc");
+  queries.push("spa in:name,description sort:stars-desc");
+  queries.push("pwa in:name,description sort:stars-desc");
+  queries.push("cms in:name,description sort:stars-desc");
+  queries.push("ecommerce in:name,description sort:stars-desc");
+  queries.push("dashboard in:name,description sort:stars-desc");
+  queries.push("admin-panel in:name,description sort:stars-desc");
+  queries.push("blog in:name,description sort:stars-desc");
+  
+  // 5. Termos de acessibilidade e UX
+  queries.push("accessibility in:name,description sort:stars-desc");
+  queries.push("a11y in:name,description sort:stars-desc");
+  queries.push("wcag in:name,description sort:stars-desc");
+  queries.push("ux in:name,description sort:stars-desc");
+  queries.push("ui in:name,description sort:stars-desc");
+  
+  // 6. Ferramentas de teste e qualidade
+  queries.push("testing in:name,description sort:stars-desc");
+  
   return queries;
 }
 
@@ -143,21 +270,29 @@ async function processQuery(queryString, processedSet) {
       const nameWithOwner = `${repo.owner.login}/${repo.name}`;
       if (processedSet.has(nameWithOwner)) continue;
 
-      // Preferir committedDate do default branch; caso contrário usar pushedAt
-      let lastCommit = repo.pushedAt || "";
-      const target = repo.defaultBranchRef && repo.defaultBranchRef.target;
-      if (target && target.committedDate) {
-        lastCommit = target.committedDate;
-      }
+      console.log(`🔍 Verificando ferramentas em: ${nameWithOwner}`);
+      
+      // Verificar ferramentas em workflows e dependências
+      const [workflowCheck, depsCheck] = await Promise.all([
+        checkToolInWorkflows(repo.owner.login, repo.name),
+        checkToolInDependencies(repo.owner.login, repo.name)
+      ]);
 
       appendToCSV({
         repo: nameWithOwner,
-        author: repo.owner.login,
         stars: repo.stargazerCount,
-        lastCommit: lastCommit,
+        hasAxeWorkflow: workflowCheck.hasAxe ? "Sim" : "Não",
+        hasAxeDeps: depsCheck.hasAxe ? "Sim" : "Não",
+        hasPa11yWorkflow: workflowCheck.hasPa11y ? "Sim" : "Não",
+        hasPa11yDeps: depsCheck.hasPa11y ? "Sim" : "Não",
+        hasWaveDeps: depsCheck.hasWave ? "Sim" : "Não",
+        hasWaveWorkflow: workflowCheck.hasWave ? "Sim" : "Não",
       });
       processedSet.add(nameWithOwner);
       saved++;
+      
+      // Pequena pausa para evitar rate limiting
+      await new Promise((r) => setTimeout(r, 100));
     }
 
     if (!data.search.pageInfo.hasNextPage) break;
@@ -176,9 +311,10 @@ async function main() {
   let totalScanned = 0;
 
   console.log(
-    "🚀 Iniciando coleta de bibliotecas de ferramentas de acessibilidade..."
+    "🚀 Iniciando coleta expandida de projetos web que podem usar ferramentas de acessibilidade..."
   );
-  console.log(`📋 Total de termos: ${queries.length}`);
+  console.log(`📋 Total de queries: ${queries.length}`);
+  console.log("🔍 Escopo: Projetos web, frameworks, ferramentas de teste e projetos de acessibilidade");
 
   for (const q of queries) {
     console.log(`\n🔎 Query: ${q}`);
