@@ -42,6 +42,69 @@ function formatDate(dateString) {
   return date.toLocaleDateString('pt-BR');
 }
 
+// Função para detectar se é uma biblioteca
+function isLibrary(repoName, description) {
+  const libraryKeywords = [
+    'library', 'lib', 'sdk', 'framework', 'toolkit', 'engine',
+    'package', 'module', 'plugin', 'extension', 'addon',
+    'wrapper', 'client', 'api', 'core', 'utils', 'helpers',
+    'components', 'ui-components', 'design-system', 'kit',
+    'boilerplate', 'template', 'starter', 'scaffold',
+    'polyfill', 'shim', 'poly', 'ponyfill'
+  ];
+  
+  const text = `${repoName} ${description || ''}`.toLowerCase();
+  return libraryKeywords.some(keyword => text.includes(keyword));
+}
+
+// Função para detectar se é uma aplicação web
+function isWebApp(repoName, description) {
+  const webAppKeywords = [
+    'app', 'application', 'website', 'site', 'webapp', 'web-app',
+    'dashboard', 'admin', 'portal', 'platform', 'service',
+    'frontend', 'front-end', 'spa', 'pwa', 'cms', 'blog',
+    'ecommerce', 'e-commerce', 'shop', 'store', 'marketplace',
+    'landing', 'landing-page', 'portfolio', 'showcase',
+    'game', 'tool', 'editor', 'builder', 'generator'
+  ];
+  
+  const text = `${repoName} ${description || ''}`.toLowerCase();
+  return webAppKeywords.some(keyword => text.includes(keyword));
+}
+
+// Função para verificar estrutura de aplicação web
+async function hasWebAppStructure(owner, repo) {
+  const webAppFiles = [
+    'index.html', 'app.html', 'main.html', 'home.html',
+    'public/index.html', 'src/index.html', 'app/index.html',
+    'Dockerfile', 'docker-compose.yml', 'docker-compose.yaml',
+    'vercel.json', 'netlify.toml', 'firebase.json'
+  ];
+  
+  // Verificar alguns arquivos chave (limitado para não sobrecarregar API)
+  const filesToCheck = webAppFiles.slice(0, 3); // Verificar apenas os primeiros 3
+  
+  for (const fileName of filesToCheck) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
+    
+    try {
+      const response = await fetchWithTimeout(url, {
+        headers: {
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+        },
+      }, 5000); // Timeout menor para verificação rápida
+      
+      if (response.ok) {
+        return true; // Encontrou pelo menos um arquivo típico de web app
+      }
+    } catch (error) {
+      // Continua verificando outros arquivos
+    }
+  }
+  
+  return false;
+}
+
 const writeHeader = () => {
   if (!fs.existsSync(csvPath)) {
     fs.writeFileSync(
@@ -230,7 +293,8 @@ async function main() {
   );
   console.log("🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste");
   console.log("🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y ou WAVE serão salvos");
-  // console.log(`📅 Filtro de data: Apenas repositórios com commits nos últimos ${SELECTED_DATE_FILTER} (${DATE_FILTERS[SELECTED_DATE_FILTER]} meses)`);
+  console.log(`📅 Filtro de data: DESABILITADO - Todos os repositórios serão analisados independente da data do último commit`);
+  console.log("🌐 Filtro de tipo: Apenas aplicações web serão analisadas (bibliotecas serão excluídas)");
 
   const queryStrings = [
     // 🌟 Repositórios mais populares em geral (ordenados por estrelas)
@@ -325,21 +389,38 @@ async function main() {
           }
 
           // Verificar se está dentro do período desejado
-          // const isRecent = isWithinDateRange(lastCommit, DATE_FILTERS[SELECTED_DATE_FILTER]);
+          const isRecent = isWithinDateRange(lastCommit, DATE_FILTERS[SELECTED_DATE_FILTER]);
 
-          // if (!isRecent) {
-          //   console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - Último commit muito antigo (${formatDate(lastCommit)})`);
-          //   processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
-          //   continue;
-          // }
+          if (!isRecent) {
+            console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - Último commit muito antigo (${formatDate(lastCommit)})`);
+            processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
+            continue;
+          }
 
-          // Adiciona repositório para análise (sem filtro de data)
+          // Verificar se é uma biblioteca (excluir)
+          if (isLibrary(repo.name, repo.description || '')) {
+            console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - É uma biblioteca`);
+            processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
+            continue;
+          }
+
+          // Verificar se parece ser uma aplicação web
+          const looksLikeWebApp = isWebApp(repo.name, repo.description || '');
+          const hasWebStructure = await hasWebAppStructure(repo.owner.login, repo.name);
+          
+          if (!looksLikeWebApp && !hasWebStructure) {
+            console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - Não parece ser uma aplicação web`);
+            processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
+            continue;
+          }
+
+          // Adiciona repositório para análise (filtrado para aplicações web)
           processedRepos.add(nameWithOwner);
           queryAnalyzed++;
           totalAnalyzed++;
 
           console.log(
-            `🔍 Analisando repositório popular (${queryAnalyzed}): ${nameWithOwner} (${repo.stargazerCount}⭐) - Último commit: ${formatDate(lastCommit)}`
+            `🔍 Analisando aplicação web (${queryAnalyzed}): ${nameWithOwner} (${repo.stargazerCount}⭐) - Último commit: ${formatDate(lastCommit)}`
           );
 
           const wf = await checkWorkflows(repo.owner.login, repo.name);
