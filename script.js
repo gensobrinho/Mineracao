@@ -2,7 +2,7 @@ const fetch = require("node-fetch");
 const fs = require("fs");
 require("dotenv").config();
 
-const GITHUB_TOKEN = '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';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 if (!GITHUB_TOKEN) {
   console.error(
@@ -230,7 +230,7 @@ async function main() {
   );
   console.log("🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste");
   console.log("🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y ou WAVE serão salvos");
-  console.log(`📅 Filtro de data: Apenas repositórios com commits nos últimos ${SELECTED_DATE_FILTER} (${DATE_FILTERS[SELECTED_DATE_FILTER]} meses)`);
+  // console.log(`📅 Filtro de data: Apenas repositórios com commits nos últimos ${SELECTED_DATE_FILTER} (${DATE_FILTERS[SELECTED_DATE_FILTER]} meses)`);
 
   const queryStrings = [
     // 🌟 Repositórios mais populares em geral (ordenados por estrelas)
@@ -325,18 +325,18 @@ async function main() {
           }
 
           // Verificar se está dentro do período desejado
-          const isRecent = isWithinDateRange(lastCommit, DATE_FILTERS[SELECTED_DATE_FILTER]);
+          // const isRecent = isWithinDateRange(lastCommit, DATE_FILTERS[SELECTED_DATE_FILTER]);
 
-          if (!isRecent) {
-            console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - Último commit muito antigo (${formatDate(lastCommit)})`);
-            processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
-            continue;
-          }
+          // if (!isRecent) {
+          //   console.log(`⏭️  REPOSITÓRIO IGNORADO: ${nameWithOwner} - Último commit muito antigo (${formatDate(lastCommit)})`);
+          //   processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
+          //   continue;
+          // }
 
-          // Adiciona repositório para análise (com filtro de data)
+          // Adiciona repositório para análise (sem filtro de data)
           processedRepos.add(nameWithOwner);
           queryAnalyzed++;
-          totalAnalyzed++; // Incrementa contador global
+          totalAnalyzed++;
 
           console.log(
             `🔍 Analisando repositório popular (${queryAnalyzed}): ${nameWithOwner} (${repo.stargazerCount}⭐) - Último commit: ${formatDate(lastCommit)}`
