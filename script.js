@@ -50,7 +50,7 @@ function isLibrary(repoName, description) {
     'wrapper', 'client', 'api', 'core', 'utils', 'helpers',
     'components', 'ui-components', 'design-system', 'kit',
     'boilerplate', 'template', 'starter', 'scaffold',
-    'polyfill', 'shim', 'poly', 'ponyfill', 'framework‑free', 'component', 'tool'
+    'polyfill', 'shim', 'poly', 'ponyfill', 'framework‑free', 'component'
   ];
   
   const text = `${repoName} ${description || ''}`.toLowerCase();
@@ -65,7 +65,8 @@ function isWebApp(repoName, description) {
     'frontend', 'front-end', 'spa', 'pwa', 'cms', 'blog',
     'ecommerce', 'e-commerce', 'shop', 'store', 'marketplace',
     'landing', 'landing-page', 'portfolio', 'showcase',
-    'game', 'tool', 'editor', 'builder', 'generator'
+    'game', 'tool', 'editor', 'builder', 'generator',
+    'web application', 'web-application'
   ];
   
   const text = `${repoName} ${description || ''}`.toLowerCase();
@@ -82,7 +83,7 @@ async function hasWebAppStructure(owner, repo) {
   ];
   
   // Verificar alguns arquivos chave (limitado para não sobrecarregar API)
-  const filesToCheck = webAppFiles.slice(0, 3); // Verificar apenas os primeiros 3
+  const filesToCheck = webAppFiles.slice(0, 6); // Verificar apenas os primeiros 3
   
   for (const fileName of filesToCheck) {
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
@@ -225,6 +226,19 @@ async function checkDependencies(owner, repo) {
     "requirements.txt",
     "Gemfile",
     "composer.json",
+    ".pa11yci.json",
+    ".lighthouseci.json", 
+    ".html_codesniffer.json",
+    "pa11y.json",
+    "lighthouse.json",
+    "axe.json",
+    "wave.json",
+    ".pa11y.json",
+    ".lighthouse.json",
+    ".axe.json",
+    ".wave.json",
+    'pa11y.js',
+    'pa11yci.js',
   ];
   let axe = false,
     pa11y = false,
@@ -424,18 +438,21 @@ async function main() {
             continue;
           }
 
-          // Verificar se é uma biblioteca (excluir)
-          if (isLibrary(repo.name, repo.description || '')) {
-            console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - É uma biblioteca`);
-            processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
-            continue;
-          }
-
-          // Verificar se parece ser uma aplicação web
+          // Verificar se parece ser uma aplicação web (prioridade)
           const looksLikeWebApp = isWebApp(repo.name, repo.description || '');
           const hasWebStructure = await hasWebAppStructure(repo.owner.login, repo.name);
           
-          if (!looksLikeWebApp && !hasWebStructure) {
+          // Se é uma aplicação web, não verificar se é biblioteca
+          if (looksLikeWebApp || hasWebStructure) {
+            console.log(`✅ Aplicação web detectada: ${nameWithOwner}`);
+          } else {
+            // Só verificar se é biblioteca se não for aplicação web
+            if (isLibrary(repo.name, repo.description || '')) {
+              console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - É uma biblioteca`);
+              processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
+              continue;
+            }
+            
             console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - Não parece ser uma aplicação web`);
             processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
             continue;
