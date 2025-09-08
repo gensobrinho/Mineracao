@@ -194,8 +194,20 @@ async function main() {
     // 📱 Repositórios de aplicações/plataformas populares
     "topic:app stars:>50 sort:stars-desc",
     "topic:application stars:>50 sort:stars-desc",
-    "topic:platform stars:>50 sort:stars-desc",
     "topic:dashboard stars:>50 sort:stars-desc",
+
+    // 🌐 NOVA SEÇÃO: Busca específica por "website" na descrição
+    "website in:description stars:>100 sort:stars-desc",
+    "website in:description stars:>50 sort:stars-desc",
+    "website in:description stars:>10 sort:stars-desc",
+    "website in:description stars:>5 sort:stars-desc",
+
+    // 🌐 Busca por termos relacionados a websites
+    "landing page in:description sort:stars-desc",
+    "homepage in:description sort:stars-desc",
+    "web presence in:description sort:stars-desc",
+    "online presence in:description sort:stars-desc",
+    "web application in:description sort:stars-desc",
   ];
 
   for (const queryString of queryStrings) {
