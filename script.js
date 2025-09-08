@@ -43,22 +43,22 @@ function formatDate(dateString) {
 }
 
 // Função para detectar se é uma biblioteca
-function isLibrary(repoName, description) {
+function isLibrary(repoName, description, about) {
   const libraryKeywords = [
     'library', 'lib', 'sdk', 'framework', 'toolkit', 'engine',
     'package', 'module', 'plugin', 'extension', 'addon',
     'wrapper', 'client', 'api', 'core', 'utils', 'helpers',
     'components', 'ui-components', 'design-system', 'kit',
     'boilerplate', 'template', 'starter', 'scaffold',
-    'polyfill', 'shim', 'poly', 'ponyfill'
+    'polyfill', 'shim', 'poly', 'ponyfill', 'framework‑free', 'component', 'tool'
   ];
   
-  const text = `${repoName} ${description || ''}`.toLowerCase();
+  const text = `${repoName} ${description || ''} ${about || ''}`.toLowerCase();
   return libraryKeywords.some(keyword => text.includes(keyword));
 }
 
 // Função para detectar se é uma aplicação web
-function isWebApp(repoName, description) {
+function isWebApp(repoName, description, about) {
   const webAppKeywords = [
     'app', 'application', 'website', 'site', 'webapp', 'web-app',
     'dashboard', 'admin', 'portal', 'platform', 'service',
@@ -68,7 +68,7 @@ function isWebApp(repoName, description) {
     'game', 'tool', 'editor', 'builder', 'generator'
   ];
   
-  const text = `${repoName} ${description || ''}`.toLowerCase();
+  const text = `${repoName} ${description || ''} ${about || ''}`.toLowerCase();
   return webAppKeywords.some(keyword => text.includes(keyword));
 }
 
@@ -109,13 +109,13 @@ const writeHeader = () => {
   if (!fs.existsSync(csvPath)) {
     fs.writeFileSync(
       csvPath,
-      "Repositório,Estrelas,Data do Último Commit,AXE em Workflow,Pa11y em Workflow,Wave em Workflow,AXE em Dependência,Pa11y em Dependência,Wave em Dependência\n"
+      "Repositório,Estrelas,Data do Último Commit,AXE em Workflow,Pa11y em Workflow,Wave em Workflow,Asqata-sun em Workflow,HTML_CodeSniffer em Workflow,Equal Access em Workflow,AXE em Dependência,Pa11y em Dependência,Wave em Dependência,Asqata-sun em Dependência,HTML_CodeSniffer em Dependência,Equal Access em Dependência\n"
     );
   }
 };
 
 const appendToCSV = (row) => {
-  const line = `${row.nameWithOwner},${row.stars},${row.lastCommit},${row.axe_wf},${row.pa11y_wf},${row.wave_wf},${row.axe_dep},${row.pa11y_dep},${row.wave_dep}\n`;
+  const line = `${row.nameWithOwner},${row.stars},${row.lastCommit},${row.axe_wf},${row.pa11y_wf},${row.wave_wf},${row.asqata_wf},${row.htmlcs_wf},${row.equalaccess_wf},${row.axe_dep},${row.pa11y_dep},${row.wave_dep},${row.asqata_dep},${row.htmlcs_dep},${row.equalaccess_dep}\n`;
   fs.appendFileSync(csvPath, line);
 };
 
@@ -172,7 +172,10 @@ async function checkWorkflows(owner, repo) {
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/.github/workflows`;
   let axe = false,
     pa11y = false,
-    wave = false;
+    wave = false,
+    asqata = false,
+    htmlcs = false,
+    equalaccess = false;
 
   try {
     const response = await fetchWithTimeout(url, {
@@ -181,12 +184,12 @@ async function checkWorkflows(owner, repo) {
       },
     });
 
-    if (response.status === 404) return { axe, pa11y, wave };
+    if (response.status === 404) return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
     if (!response.ok)
       throw new Error(`Erro ao buscar workflows: ${response.statusText}`);
 
     const files = await response.json();
-    if (!Array.isArray(files)) return { axe, pa11y, wave };
+    if (!Array.isArray(files)) return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
 
     for (const file of files) {
       if (file.name.endsWith(".yml") || file.name.endsWith(".yaml")) {
@@ -202,12 +205,15 @@ async function checkWorkflows(owner, repo) {
           if (workflowContent.includes("axe") || workflowContent.includes("axe-core")) axe = true;
           if (workflowContent.includes("pa11y")) pa11y = true;
           if (workflowContent.includes("wave") || workflowContent.includes("webaim")) wave = true;
+          if (workflowContent.includes("asqata") || workflowContent.includes("asqata-sun")) asqata = true;
+          if (workflowContent.includes("html_codesniffer") || workflowContent.includes("html-codesniffer") || workflowContent.includes("htmlcodesniffer")) htmlcs = true;
+          if (workflowContent.includes("equal access") || workflowContent.includes("equal-access") || workflowContent.includes("ibm equal access") || workflowContent.includes("achecker")) equalaccess = true;
         } catch (error) {}
       }
     }
-    return { axe, pa11y, wave };
+    return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
   } catch (error) {
-    return { axe, pa11y, wave };
+    return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
   }
 }
 
@@ -220,7 +226,10 @@ async function checkDependencies(owner, repo) {
   ];
   let axe = false,
     pa11y = false,
-    wave = false;
+    wave = false,
+    asqata = false,
+    htmlcs = false,
+    equalaccess = false;
 
   for (const fileName of dependencyFiles) {
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
@@ -246,10 +255,13 @@ async function checkDependencies(owner, repo) {
         if (content.includes("axe") || content.includes("axe-core")) axe = true;
         if (content.includes("pa11y")) pa11y = true;
         if (content.includes("wave") || content.includes("webaim")) wave = true;
+        if (content.includes("asqata") || content.includes("asqata-sun")) asqata = true;
+        if (content.includes("html_codesniffer") || content.includes("html-codesniffer") || content.includes("htmlcodesniffer")) htmlcs = true;
+        if (content.includes("equal access") || content.includes("equal-access") || content.includes("ibm equal access") || content.includes("achecker")) equalaccess = true;
       }
     } catch (error) {}
   }
-  return { axe, pa11y, wave };
+  return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
 }
 
 const searchRepositoriesQuery = `
@@ -260,6 +272,8 @@ query($queryString: String!, $first: Int!, $after: String) {
       node {
         ... on Repository {
           name
+          description
+          about
           owner { login }
           stargazerCount
           pushedAt
@@ -292,7 +306,7 @@ async function main() {
     "🚀 Iniciando coleta focada em projetos frontend e acessibilidade web..."
   );
   console.log("🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste");
-  console.log("🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y ou WAVE serão salvos");
+  console.log("🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y, WAVE, Asqata-sun, HTML_CodeSniffer ou Equal Access/AChecker serão salvos");
   console.log(`📅 Filtro de data: DESABILITADO - Todos os repositórios serão analisados independente da data do último commit`);
   console.log("🌐 Filtro de tipo: Apenas aplicações web serão analisadas (bibliotecas serão excluídas)");
 
@@ -327,6 +341,14 @@ async function main() {
     "pa11y in:name,description,readme sort:stars-desc",
     "WAVE in:name,description,readme sort:stars-desc",
     "wave in:name,description,readme sort:stars-desc",
+    "asqata-sun in:name,description,readme sort:stars-desc",
+    "asqata in:name,description,readme sort:stars-desc",
+    "html_codesniffer in:name,description,readme sort:stars-desc",
+    "html-codesniffer in:name,description,readme sort:stars-desc",
+    "equal access in:name,description,readme sort:stars-desc",
+    "ibm equal access in:name,description,readme sort:stars-desc",
+    "achecker in:name,description,readme sort:stars-desc",
+    "ibm achecker in:name,description,readme sort:stars-desc",
 
     // 🎯 Termos de acessibilidade e UX/UI
     "accessibility in:name,description sort:stars-desc",
@@ -398,14 +420,14 @@ async function main() {
           }
 
           // Verificar se é uma biblioteca (excluir)
-          if (isLibrary(repo.name, repo.description || '')) {
+          if (isLibrary(repo.name, repo.description || '', repo.about || '')) {
             console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - É uma biblioteca`);
             processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
             continue;
           }
 
           // Verificar se parece ser uma aplicação web
-          const looksLikeWebApp = isWebApp(repo.name, repo.description || '');
+          const looksLikeWebApp = isWebApp(repo.name, repo.description || '', repo.about || '');
           const hasWebStructure = await hasWebAppStructure(repo.owner.login, repo.name);
           
           if (!looksLikeWebApp && !hasWebStructure) {
@@ -430,9 +452,15 @@ async function main() {
             wf.axe ||
             wf.pa11y ||
             wf.wave ||
+            wf.asqata ||
+            wf.htmlcs ||
+            wf.equalaccess ||
             dep.axe ||
             dep.pa11y ||
-            dep.wave
+            dep.wave ||
+            dep.asqata ||
+            dep.htmlcs ||
+            dep.equalaccess
           ) {
             appendToCSV({
               nameWithOwner,
@@ -441,9 +469,15 @@ async function main() {
               axe_wf: wf.axe ? "Sim" : "Nao",
               pa11y_wf: wf.pa11y ? "Sim" : "Nao",
               wave_wf: wf.wave ? "Sim" : "Nao",
+              asqata_wf: wf.asqata ? "Sim" : "Nao",
+              htmlcs_wf: wf.htmlcs ? "Sim" : "Nao",
+              equalaccess_wf: wf.equalaccess ? "Sim" : "Nao",
               axe_dep: dep.axe ? "Sim" : "Nao",
               pa11y_dep: dep.pa11y ? "Sim" : "Nao",
               wave_dep: dep.wave ? "Sim" : "Nao",
+              asqata_dep: dep.asqata ? "Sim" : "Nao",
+              htmlcs_dep: dep.htmlcs ? "Sim" : "Nao",
+              equalaccess_dep: dep.equalaccess ? "Sim" : "Nao",
             });
             queryFound++;
             totalFound++;
