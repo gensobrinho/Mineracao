@@ -44,65 +44,7 @@ function formatDate(dateString) {
 
 // Função para detectar se é uma biblioteca
 function isLibrary(repoName, description) {
-  const text = `${repoName} ${description || ""}`.toLowerCase();
-  
-  // Indicadores de aplicação web (prioridade alta - se tem, não é biblioteca)
-  const webAppIndicators = [
-    "website",
-    "webapp",
-    "web-app",
-    "web app",
-    "application",
-    "app",
-    "dashboard",
-    "portal",
-    "platform",
-    "service",
-    "site",
-    "blog",
-    "ecommerce",
-    "e-commerce",
-    "shop",
-    "store",
-    "cms",
-    "admin",
-    "panel",
-    "interface",
-    "frontend",
-    "front-end",
-    "front end",
-    "backend",
-    "back-end",
-    "back end",
-    "fullstack",
-    "full-stack",
-    "full stack",
-    "pwa",
-    "progressive web app",
-    "real-time collaboration",
-    "collaboration",
-    "offline",
-    "autosave",
-    "shareable",
-    "hosted",
-    "deployed",
-    "production",
-    "demo",
-    "showcase",
-    "example",
-    "sample",
-    "test",
-    "playground",
-    "tutorial"
-  ];
-
-  // Se tem indicadores de aplicação web, NÃO é biblioteca
-  if (webAppIndicators.some((indicator) => text.includes(indicator))) {
-    return false;
-  }
-
-  // Indicadores FORTES de que é uma biblioteca/SDK (só se não for app web)
-  const strongLibraryIndicators = [
+  const libraryKeywords = [
     "library",
     "lib",
     "sdk",
@@ -115,92 +57,37 @@ function isLibrary(repoName, description) {
     "extension",
     "addon",
     "wrapper",
+    "client",
+    "api",
+    "core",
+    "utils",
+    "helpers",
+    "components",
+    "ui-components",
+    "design-system",
+    "kit",
+    "boilerplate",
+    "template",
+    "starter",
+    "scaffold",
     "polyfill",
     "shim",
     "poly",
     "ponyfill",
-    "npm-package",
-    "npm package",
-    "ruby-gem",
-    "ruby gem",
-    "python-package",
-    "python package",
-    "composer-package",
-    "composer package"
+    "framework‑free",
+    "component",
+    "tool",
+    "automation",
+    "bot",
+    "script",
+    "tool",
+    "helper",
+    "utility",
+    "automation",
   ];
 
-  // Combinções que indicam biblioteca (contexto importante)
-  const libraryCombinations = [
-    // API + biblioteca
-    ["api", "library"],
-    ["api", "client"],
-    ["api", "wrapper"],
-    ["api", "sdk"],
-    ["rest", "api", "client"],
-    ["graphql", "client"],
-    ["http", "client"],
-    
-    // Component + biblioteca
-    ["component", "library"],
-    ["ui", "component", "library"],
-    ["react", "component", "library"],
-    ["vue", "component", "library"],
-    ["angular", "component", "library"],
-    ["web", "component", "library"],
-    
-    // Tool + biblioteca
-    ["tool", "library"],
-    ["utility", "library"],
-    ["helper", "library"],
-    ["util", "library"],
-    
-    // Core + biblioteca
-    ["core", "library"],
-    ["core", "package"],
-    ["core", "module"],
-    
-    // Utils + biblioteca
-    ["utils", "library"],
-    ["utilities", "library"],
-    ["helpers", "library"],
-    
-    // Cliente específico
-    ["api-client"],
-    ["api client"],
-    ["rest-client"],
-    ["rest client"],
-    ["http-client"],
-    ["http client"]
-  ];
-
-  // Se tem indicadores fortes de biblioteca, é biblioteca
-  if (strongLibraryIndicators.some((indicator) => text.includes(indicator))) {
-    return true;
-  }
-
-  // Verificar combinações que indicam biblioteca
-  for (const combination of libraryCombinations) {
-    if (combination.every((word) => text.includes(word))) {
-      return true;
-    }
-  }
-
-  // Palavras-chave que podem indicar biblioteca quando aparecem sozinhas
-  const standaloneLibraryKeywords = [
-    "core",
-    "utils",
-    "helpers",
-    "client"
-  ];
-
-  const hasStandaloneKeywords = standaloneLibraryKeywords.some((keyword) => text.includes(keyword));
-  
-  if (hasStandaloneKeywords) {
-    // Se tem palavras standalone, é biblioteca
-    return true;
-  }
-
-  return false;
+  const text = `${repoName} ${description || ""}`.toLowerCase();
+  return libraryKeywords.some((keyword) => text.includes(keyword));
 }
 
 // Função para verificar estrutura de aplicação web
@@ -222,7 +109,7 @@ async function hasWebAppStructure(owner, repo) {
   ];
 
   // Verificar alguns arquivos chave (limitado para não sobrecarregar API)
-  const filesToCheck = webAppFiles.slice(0, 5);
+  const filesToCheck = webAppFiles.slice(0, 3);
 
   for (const fileName of filesToCheck) {
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
@@ -507,7 +394,7 @@ async function main() {
     "🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste"
   );
   console.log(
-    "🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y, WAVE, Asqata-sun, HTML_CodeSniffer, Equal Access/AChecker ou Lighthouse serão salvos"
+    "🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y, WAVE, Asqata-sun, HTML_CodeSniffer ou Equal Access/AChecker serão salvos"
   );
   console.log(
     `📅 Filtro de data: DESABILITADO - Todos os repositórios serão analisados independente da data do último commit`
@@ -554,9 +441,6 @@ async function main() {
     "ibm equal access in:name,description,readme sort:stars-desc",
     "achecker in:name,description,readme sort:stars-desc",
     "ibm achecker in:name,description,readme sort:stars-desc",
-    "lighthouse in:name,description,readme sort:stars-desc",
-    "google lighthouse in:name,description,readme sort:stars-desc",
-    "lighthouse-ci in:name,description,readme sort:stars-desc",
 
     // 🎯 Termos de acessibilidade e UX/UI
     "accessibility in:name,description sort:stars-desc",
