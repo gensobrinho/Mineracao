@@ -43,7 +43,7 @@ function formatDate(dateString) {
 }
 
 // Função para detectar se é uma biblioteca
-function isLibrary(repoName, description, about) {
+function isLibrary(repoName, description) {
   const libraryKeywords = [
     'library', 'lib', 'sdk', 'framework', 'toolkit', 'engine',
     'package', 'module', 'plugin', 'extension', 'addon',
@@ -53,12 +53,12 @@ function isLibrary(repoName, description, about) {
     'polyfill', 'shim', 'poly', 'ponyfill', 'framework‑free', 'component', 'tool'
   ];
   
-  const text = `${repoName} ${description || ''} ${about || ''}`.toLowerCase();
+  const text = `${repoName} ${description || ''}`.toLowerCase();
   return libraryKeywords.some(keyword => text.includes(keyword));
 }
 
 // Função para detectar se é uma aplicação web
-function isWebApp(repoName, description, about) {
+function isWebApp(repoName, description) {
   const webAppKeywords = [
     'app', 'application', 'website', 'site', 'webapp', 'web-app',
     'dashboard', 'admin', 'portal', 'platform', 'service',
@@ -68,7 +68,7 @@ function isWebApp(repoName, description, about) {
     'game', 'tool', 'editor', 'builder', 'generator'
   ];
   
-  const text = `${repoName} ${description || ''} ${about || ''}`.toLowerCase();
+  const text = `${repoName} ${description || ''}`.toLowerCase();
   return webAppKeywords.some(keyword => text.includes(keyword));
 }
 
@@ -273,7 +273,6 @@ query($queryString: String!, $first: Int!, $after: String) {
         ... on Repository {
           name
           description
-          about
           owner { login }
           stargazerCount
           pushedAt
@@ -420,14 +419,14 @@ async function main() {
           }
 
           // Verificar se é uma biblioteca (excluir)
-          if (isLibrary(repo.name, repo.description || '', repo.about || '')) {
+          if (isLibrary(repo.name, repo.description || '')) {
             console.log(`⏭️ REPOSITÓRIO IGNORADO: ${nameWithOwner} - É uma biblioteca`);
             processedRepos.add(nameWithOwner); // Marcar como processado para não verificar novamente
             continue;
           }
 
           // Verificar se parece ser uma aplicação web
-          const looksLikeWebApp = isWebApp(repo.name, repo.description || '', repo.about || '');
+          const looksLikeWebApp = isWebApp(repo.name, repo.description || '');
           const hasWebStructure = await hasWebAppStructure(repo.owner.login, repo.name);
           
           if (!looksLikeWebApp && !hasWebStructure) {
