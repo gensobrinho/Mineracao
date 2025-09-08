@@ -46,7 +46,62 @@ function formatDate(dateString) {
 function isLibrary(repoName, description) {
   const text = `${repoName} ${description || ""}`.toLowerCase();
   
-  // Indicadores FORTES de que é uma biblioteca/SDK
+  // Indicadores de aplicação web (prioridade alta - se tem, não é biblioteca)
+  const webAppIndicators = [
+    "website",
+    "webapp",
+    "web-app",
+    "web app",
+    "application",
+    "app",
+    "dashboard",
+    "portal",
+    "platform",
+    "service",
+    "site",
+    "blog",
+    "ecommerce",
+    "e-commerce",
+    "shop",
+    "store",
+    "cms",
+    "admin",
+    "panel",
+    "interface",
+    "frontend",
+    "front-end",
+    "front end",
+    "backend",
+    "back-end",
+    "back end",
+    "fullstack",
+    "full-stack",
+    "full stack",
+    "pwa",
+    "progressive web app",
+    "real-time collaboration",
+    "collaboration",
+    "offline",
+    "autosave",
+    "shareable",
+    "hosted",
+    "deployed",
+    "production",
+    "demo",
+    "showcase",
+    "example",
+    "sample",
+    "test",
+    "playground",
+    "tutorial"
+  ];
+
+  // Se tem indicadores de aplicação web, NÃO é biblioteca
+  if (webAppIndicators.some((indicator) => text.includes(indicator))) {
+    return false;
+  }
+
+  // Indicadores FORTES de que é uma biblioteca/SDK (só se não for app web)
   const strongLibraryIndicators = [
     "library",
     "lib",
@@ -131,7 +186,6 @@ function isLibrary(repoName, description) {
   }
 
   // Palavras-chave que podem indicar biblioteca quando aparecem sozinhas
-  // Mas só se NÃO tiverem indicadores de que é uma aplicação
   const standaloneLibraryKeywords = [
     "core",
     "utils",
@@ -142,37 +196,8 @@ function isLibrary(repoName, description) {
   const hasStandaloneKeywords = standaloneLibraryKeywords.some((keyword) => text.includes(keyword));
   
   if (hasStandaloneKeywords) {
-    // Se tem palavras standalone mas também tem indicadores de aplicação, não é biblioteca
-    const hasAppIndicators = text.includes("demo") || 
-                            text.includes("example") || 
-                            text.includes("sample") ||
-                            text.includes("test") ||
-                            text.includes("playground") ||
-                            text.includes("showcase") ||
-                            text.includes("tutorial") ||
-                            text.includes("website") ||
-                            text.includes("webapp") ||
-                            text.includes("web-app") ||
-                            text.includes("web app") ||
-                            text.includes("application") ||
-                            text.includes("app") ||
-                            text.includes("dashboard") ||
-                            text.includes("portal") ||
-                            text.includes("platform") ||
-                            text.includes("service") ||
-                            text.includes("site") ||
-                            text.includes("blog") ||
-                            text.includes("ecommerce") ||
-                            text.includes("e-commerce") ||
-                            text.includes("shop") ||
-                            text.includes("store") ||
-                            text.includes("cms") ||
-                            text.includes("admin") ||
-                            text.includes("panel") ||
-                            text.includes("interface");
-    
-    // Só é biblioteca se NÃO tiver indicadores de aplicação
-    return !hasAppIndicators;
+    // Se tem palavras standalone, é biblioteca
+    return true;
   }
 
   return false;
