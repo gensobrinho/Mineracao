@@ -44,7 +44,10 @@ function formatDate(dateString) {
 
 // Função para detectar se é uma biblioteca
 function isLibrary(repoName, description) {
-  const libraryKeywords = [
+  const text = `${repoName} ${description || ""}`.toLowerCase();
+  
+  // Indicadores FORTES de que é uma biblioteca/SDK
+  const strongLibraryIndicators = [
     "library",
     "lib",
     "sdk",
@@ -57,37 +60,122 @@ function isLibrary(repoName, description) {
     "extension",
     "addon",
     "wrapper",
-    "client",
-    "api",
-    "core",
-    "utils",
-    "helpers",
-    "components",
-    "ui-components",
-    "design-system",
-    "kit",
-    "boilerplate",
-    "template",
-    "starter",
-    "scaffold",
     "polyfill",
     "shim",
     "poly",
     "ponyfill",
-    "framework‑free",
-    "component",
-    "tool",
-    "automation",
-    "bot",
-    "script",
-    "tool",
-    "helper",
-    "utility",
-    "automation",
+    "npm-package",
+    "npm package",
+    "ruby-gem",
+    "ruby gem",
+    "python-package",
+    "python package",
+    "composer-package",
+    "composer package"
   ];
 
-  const text = `${repoName} ${description || ""}`.toLowerCase();
-  return libraryKeywords.some((keyword) => text.includes(keyword));
+  // Combinções que indicam biblioteca (contexto importante)
+  const libraryCombinations = [
+    // API + biblioteca
+    ["api", "library"],
+    ["api", "client"],
+    ["api", "wrapper"],
+    ["api", "sdk"],
+    ["rest", "api", "client"],
+    ["graphql", "client"],
+    ["http", "client"],
+    
+    // Component + biblioteca
+    ["component", "library"],
+    ["ui", "component", "library"],
+    ["react", "component", "library"],
+    ["vue", "component", "library"],
+    ["angular", "component", "library"],
+    ["web", "component", "library"],
+    
+    // Tool + biblioteca
+    ["tool", "library"],
+    ["utility", "library"],
+    ["helper", "library"],
+    ["util", "library"],
+    
+    // Core + biblioteca
+    ["core", "library"],
+    ["core", "package"],
+    ["core", "module"],
+    
+    // Utils + biblioteca
+    ["utils", "library"],
+    ["utilities", "library"],
+    ["helpers", "library"],
+    
+    // Cliente específico
+    ["api-client"],
+    ["api client"],
+    ["rest-client"],
+    ["rest client"],
+    ["http-client"],
+    ["http client"]
+  ];
+
+  // Se tem indicadores fortes de biblioteca, é biblioteca
+  if (strongLibraryIndicators.some((indicator) => text.includes(indicator))) {
+    return true;
+  }
+
+  // Verificar combinações que indicam biblioteca
+  for (const combination of libraryCombinations) {
+    if (combination.every((word) => text.includes(word))) {
+      return true;
+    }
+  }
+
+  // Palavras-chave que podem indicar biblioteca quando aparecem sozinhas
+  // Mas só se NÃO tiverem indicadores de que é uma aplicação
+  const standaloneLibraryKeywords = [
+    "core",
+    "utils",
+    "helpers",
+    "client"
+  ];
+
+  const hasStandaloneKeywords = standaloneLibraryKeywords.some((keyword) => text.includes(keyword));
+  
+  if (hasStandaloneKeywords) {
+    // Se tem palavras standalone mas também tem indicadores de aplicação, não é biblioteca
+    const hasAppIndicators = text.includes("demo") || 
+                            text.includes("example") || 
+                            text.includes("sample") ||
+                            text.includes("test") ||
+                            text.includes("playground") ||
+                            text.includes("showcase") ||
+                            text.includes("tutorial") ||
+                            text.includes("website") ||
+                            text.includes("webapp") ||
+                            text.includes("web-app") ||
+                            text.includes("web app") ||
+                            text.includes("application") ||
+                            text.includes("app") ||
+                            text.includes("dashboard") ||
+                            text.includes("portal") ||
+                            text.includes("platform") ||
+                            text.includes("service") ||
+                            text.includes("site") ||
+                            text.includes("blog") ||
+                            text.includes("ecommerce") ||
+                            text.includes("e-commerce") ||
+                            text.includes("shop") ||
+                            text.includes("store") ||
+                            text.includes("cms") ||
+                            text.includes("admin") ||
+                            text.includes("panel") ||
+                            text.includes("interface");
+    
+    // Só é biblioteca se NÃO tiver indicadores de aplicação
+    return !hasAppIndicators;
+  }
+
+  return false;
 }
 
 // Função para verificar estrutura de aplicação web
@@ -109,7 +197,7 @@ async function hasWebAppStructure(owner, repo) {
   ];
 
   // Verificar alguns arquivos chave (limitado para não sobrecarregar API)
-  const filesToCheck = webAppFiles.slice(0, 3);
+  const filesToCheck = webAppFiles.slice(0, 5);
 
   for (const fileName of filesToCheck) {
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
@@ -140,13 +228,13 @@ const writeHeader = () => {
   if (!fs.existsSync(csvPath)) {
     fs.writeFileSync(
       csvPath,
-      "Repositório,Estrelas,Data do Último Commit,AXE em Workflow,Pa11y em Workflow,Wave em Workflow,Asqata-sun em Workflow,HTML_CodeSniffer em Workflow,Equal Access em Workflow,AXE em Dependência,Pa11y em Dependência,Wave em Dependência,Asqata-sun em Dependência,HTML_CodeSniffer em Dependência,Equal Access em Dependência\n"
+      "Repositório,Estrelas,Data do Último Commit,AXE em Workflow,Pa11y em Workflow,Wave em Workflow,Asqata-sun em Workflow,HTML_CodeSniffer em Workflow,Equal Access em Workflow,Lighthouse em Workflow,AXE em Dependência,Pa11y em Dependência,Wave em Dependência,Asqata-sun em Dependência,HTML_CodeSniffer em Dependência,Equal Access em Dependência,Lighthouse em Dependência\n"
     );
   }
 };
 
 const appendToCSV = (row) => {
-  const line = `${row.nameWithOwner},${row.stars},${row.lastCommit},${row.axe_wf},${row.pa11y_wf},${row.wave_wf},${row.asqata_wf},${row.htmlcs_wf},${row.equalaccess_wf},${row.axe_dep},${row.pa11y_dep},${row.wave_dep},${row.asqata_dep},${row.htmlcs_dep},${row.equalaccess_dep}\n`;
+  const line = `${row.nameWithOwner},${row.stars},${row.lastCommit},${row.axe_wf},${row.pa11y_wf},${row.wave_wf},${row.asqata_wf},${row.htmlcs_wf},${row.equalaccess_wf},${row.lighthouse_wf},${row.axe_dep},${row.pa11y_dep},${row.wave_dep},${row.asqata_dep},${row.htmlcs_dep},${row.equalaccess_dep},${row.lighthouse_dep}\n`;
   fs.appendFileSync(csvPath, line);
 };
 
@@ -210,7 +298,8 @@ async function checkWorkflows(owner, repo) {
     wave = false,
     asqata = false,
     htmlcs = false,
-    equalaccess = false;
+    equalaccess = false,
+    lighthouse = false;
 
   try {
     const response = await fetchWithTimeout(url, {
@@ -220,13 +309,13 @@ async function checkWorkflows(owner, repo) {
     });
 
     if (response.status === 404)
-      return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
+      return { axe, pa11y, wave, asqata, htmlcs, equalaccess, lighthouse };
     if (!response.ok)
       throw new Error(`Erro ao buscar workflows: ${response.statusText}`);
 
     const files = await response.json();
     if (!Array.isArray(files))
-      return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
+      return { axe, pa11y, wave, asqata, htmlcs, equalaccess, lighthouse };
 
     for (const file of files) {
       if (file.name.endsWith(".yml") || file.name.endsWith(".yaml")) {
@@ -266,12 +355,19 @@ async function checkWorkflows(owner, repo) {
             workflowContent.includes("achecker")
           )
             equalaccess = true;
+          if (
+            workflowContent.includes("lighthouse") ||
+            workflowContent.includes("google lighthouse") ||
+            workflowContent.includes("@lhci/cli") ||
+            workflowContent.includes("lighthouse-ci")
+          )
+            lighthouse = true;
         } catch (error) { }
       }
     }
-    return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
+    return { axe, pa11y, wave, asqata, htmlcs, equalaccess, lighthouse };
   } catch (error) {
-    return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
+    return { axe, pa11y, wave, asqata, htmlcs, equalaccess, lighthouse };
   }
 }
 
@@ -287,7 +383,8 @@ async function checkDependencies(owner, repo) {
     wave = false,
     asqata = false,
     htmlcs = false,
-    equalaccess = false;
+    equalaccess = false,
+    lighthouse = false;
 
   for (const fileName of dependencyFiles) {
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${fileName}`;
@@ -328,10 +425,17 @@ async function checkDependencies(owner, repo) {
           content.includes("achecker")
         )
           equalaccess = true;
+        if (
+          content.includes("lighthouse") ||
+          content.includes("google lighthouse") ||
+          content.includes("@lhci/cli") ||
+          content.includes("lighthouse-ci")
+        )
+          lighthouse = true;
       }
     } catch (error) { }
   }
-  return { axe, pa11y, wave, asqata, htmlcs, equalaccess };
+  return { axe, pa11y, wave, asqata, htmlcs, equalaccess, lighthouse };
 }
 
 const searchRepositoriesQuery = `
@@ -378,7 +482,7 @@ async function main() {
     "🔍 Escopo: Frontend, frameworks web, acessibilidade e ferramentas de teste"
   );
   console.log(
-    "🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y, WAVE, Asqata-sun, HTML_CodeSniffer ou Equal Access/AChecker serão salvos"
+    "🎯 Filtro: Apenas repositórios com ferramentas axe-core, pa11y, WAVE, Asqata-sun, HTML_CodeSniffer, Equal Access/AChecker ou Lighthouse serão salvos"
   );
   console.log(
     `📅 Filtro de data: DESABILITADO - Todos os repositórios serão analisados independente da data do último commit`
@@ -425,6 +529,9 @@ async function main() {
     "ibm equal access in:name,description,readme sort:stars-desc",
     "achecker in:name,description,readme sort:stars-desc",
     "ibm achecker in:name,description,readme sort:stars-desc",
+    "lighthouse in:name,description,readme sort:stars-desc",
+    "google lighthouse in:name,description,readme sort:stars-desc",
+    "lighthouse-ci in:name,description,readme sort:stars-desc",
 
     // 🎯 Termos de acessibilidade e UX/UI
     "accessibility in:name,description sort:stars-desc",
@@ -538,12 +645,14 @@ async function main() {
             wf.asqata ||
             wf.htmlcs ||
             wf.equalaccess ||
+            wf.lighthouse ||
             dep.axe ||
             dep.pa11y ||
             dep.wave ||
             dep.asqata ||
             dep.htmlcs ||
-            dep.equalaccess
+            dep.equalaccess ||
+            dep.lighthouse
           ) {
             appendToCSV({
               nameWithOwner,
@@ -555,12 +664,14 @@ async function main() {
               asqata_wf: wf.asqata ? "Sim" : "Nao",
               htmlcs_wf: wf.htmlcs ? "Sim" : "Nao",
               equalaccess_wf: wf.equalaccess ? "Sim" : "Nao",
+              lighthouse_wf: wf.lighthouse ? "Sim" : "Nao",
               axe_dep: dep.axe ? "Sim" : "Nao",
               pa11y_dep: dep.pa11y ? "Sim" : "Nao",
               wave_dep: dep.wave ? "Sim" : "Nao",
               asqata_dep: dep.asqata ? "Sim" : "Nao",
               htmlcs_dep: dep.htmlcs ? "Sim" : "Nao",
               equalaccess_dep: dep.equalaccess ? "Sim" : "Nao",
+              lighthouse_dep: dep.lighthouse ? "Sim" : "Nao",
             });
             queryFound++;
             totalFound++;
