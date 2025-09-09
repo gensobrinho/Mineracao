@@ -14,15 +14,54 @@ class GitHubAccessibilityMiner {
         // Sem controle de tempo interno - o GitHub Actions já controla com timeout-minutes: 35791
         this.startTime = Date.now();
         
-        // Ferramentas de acessibilidade
+        // Ferramentas de acessibilidade (multi-linguagem)
         this.accessibilityTools = {
-            'AXE': ['axe-core', 'axe', '@axe-core', 'react-axe', 'axe-selenium', 'cypress-axe', 'jest-axe', 'axe-playwright'],
-            'Pa11y': ['pa11y', 'pa11y-ci', '@pa11y'],
-            'WAVE': ['wave', 'wave-cli'],
-            'AChecker': ['achecker', 'accessibility-checker', 'ibma/equal-access'],
-            'Lighthouse': ['lighthouse', '@lighthouse', 'lighthouse-ci', 'lhci'],
-            'Asqatasun': ['asqatasun', 'asqata-sun'],
-            'HTML_CodeSniffer': ['html_codesniffer', 'htmlcs', 'squizlabs/html_codesniffer', 'pa11y-reporter-htmlcs']
+            'AXE': [
+                // JavaScript/Node.js
+                'axe-core', 'axe', '@axe-core', 'react-axe', 'axe-selenium', 'cypress-axe', 
+                'jest-axe', 'axe-playwright', 'axe-webdriverjs', 'vue-axe',
+                // Python
+                'axe-selenium-python', 'pytest-axe', 'axe-core-python',
+                // Java
+                'axe-selenium-java', 'axe-core-maven', 'axe-core-api',
+                // C#
+                'selenium.axe', 'axe.core', 'axe-core-nuget',
+                // Ruby
+                'axe-core-rspec', 'axe-matchers', 'axe-core-capybara',
+                // PHP
+                'axe-core-php', 'dmore/chrome-mink-driver'
+            ],
+            'Pa11y': [
+                // JavaScript/Node.js
+                'pa11y', 'pa11y-ci', '@pa11y', 'pa11y-webdriver', 'pa11y-reporter-cli',
+                // Python
+                'pa11y-python', 'accessibility-checker-python',
+                // Outros
+                'pa11y-dashboard', 'koa-pa11y'
+            ],
+            'WAVE': [
+                'wave', 'wave-cli', 'wave-accessibility', 'webaim-wave'
+            ],
+            'AChecker': [
+                'achecker', 'accessibility-checker', 'ibma/equal-access', 
+                'equal-access', 'accessibility-checker-engine'
+            ],
+            'Lighthouse': [
+                // JavaScript/Node.js
+                'lighthouse', '@lighthouse', 'lighthouse-ci', 'lhci', 'lighthouse-batch',
+                'lighthouse-plugin-accessibility', 'lighthouse-ci-action',
+                // Python
+                'pylighthouse', 'lighthouse-python',
+                // Outros
+                'lighthouse-badges', 'lighthouse-keeper'
+            ],
+            'Asqatasun': [
+                'asqatasun', 'asqata-sun', 'tanaguru', 'contrast-finder'
+            ],
+            'HTML_CodeSniffer': [
+                'html_codesniffer', 'htmlcs', 'squizlabs/html_codesniffer', 
+                'pa11y-reporter-htmlcs', 'htmlcodesniffer', 'html-codesniffer'
+            ]
         };
         
         // Arquivos de configuração
@@ -154,27 +193,107 @@ class GitHubAccessibilityMiner {
     isLibraryRepository(repo) {
         const description = (repo.description || '').toLowerCase();
         const name = repo.name.toLowerCase();
+        const fullName = repo.full_name.toLowerCase();
         
-        const libraryKeywords = [
-            'library', 'lib', 'biblioteca', 'component', 'componente', 'plugin',
-            'framework', 'toolkit', 'boilerplate', 'template', 'starter',
-            'utils', 'utilities', 'helper', 'helpers', 'sdk', 'api-client', 'wrapper',
-            'package', 'module', 'tool', 'cli', 'generator', 'scaffold'
+        // Palavras que DEFINITIVAMENTE indicam bibliotecas/componentes
+        const strongLibraryKeywords = [
+            'library', 'lib', 'biblioteca', 'component library', 'ui library',
+            'component collection', 'design system', 'ui components', 'react components',
+            'vue components', 'angular components', 'component kit', 'ui kit',
+            'framework', 'toolkit', 'boilerplate', 'template', 'starter kit',
+            'starter template', 'seed', 'skeleton', 'scaffold', 'generator',
+            'cli tool', 'command line', 'npm package', 'node module',
+            'plugin', 'extension', 'addon', 'middleware', 'utility',
+            'utils', 'utilities', 'helper', 'helpers', 'sdk', 'api client',
+            'wrapper', 'binding', 'polyfill', 'shim', 'mock', 'stub'
         ];
         
-        // Palavras que indicam aplicação real
-        const appKeywords = ['app', 'application', 'website', 'webapp', 'platform', 'dashboard', 'portal'];
+        // Padrões no nome que indicam bibliotecas
+        const libraryNamePatterns = [
+            /^react-/, /^vue-/, /^angular-/, /^ng-/, /^@[^/]+\//, // Prefixos comuns
+            /-ui$/, /-components$/, /-lib$/, /-kit$/, /-utils$/, /-helpers$/, // Sufixos
+            /^ui-/, /^lib-/, /^utils-/, /^helper-/, /^tool-/, /^cli-/, // Prefixos específicos
+            /-boilerplate$/, /-template$/, /-starter$/, /-seed$/, /-skeleton$/
+        ];
         
-        const hasLibraryKeywords = libraryKeywords.some(keyword => 
-            description.includes(keyword) || name.includes(keyword)
+        // Palavras que indicam aplicação REAL
+        const appKeywords = [
+            'web app', 'webapp', 'web application', 'application', 'app',
+            'website', 'site', 'portal', 'platform', 'dashboard', 'admin panel',
+            'management system', 'cms', 'blog', 'e-commerce', 'ecommerce', 'shop',
+            'store', 'marketplace', 'social network', 'chat app', 'messaging',
+            'game', 'todo app', 'task manager', 'project management',
+            'crm', 'erp', 'saas', 'web service', 'api server', 'backend'
+        ];
+        
+        // Verificar padrões fortes de biblioteca no nome
+        const hasLibraryNamePattern = libraryNamePatterns.some(pattern => 
+            pattern.test(name) || pattern.test(fullName)
         );
         
+        // Verificar palavras fortes de biblioteca
+        const hasStrongLibraryKeywords = strongLibraryKeywords.some(keyword => 
+            description.includes(keyword) || name.includes(keyword) || fullName.includes(keyword)
+        );
+        
+        // Verificar palavras de aplicação
         const hasAppKeywords = appKeywords.some(keyword => 
-            description.includes(keyword) || name.includes(keyword)
+            description.includes(keyword) || name.includes(keyword) || fullName.includes(keyword)
         );
         
-        // Se tem palavras de biblioteca mas não tem de aplicação, é provavelmente uma biblioteca
-        return hasLibraryKeywords && !hasAppKeywords;
+        // Verificar se é um repositório de "awesome list" ou coleção
+        const isAwesomeList = description.includes('awesome') || 
+                             description.includes('curated list') ||
+                             description.includes('collection of') ||
+                             description.includes('list of') ||
+                             name.includes('awesome') ||
+                             name.includes('list');
+        
+        // Verificar se é documentação, tutorial ou exemplo
+        const isDocsOrTutorial = description.includes('documentation') ||
+                                description.includes('tutorial') ||
+                                description.includes('example') ||
+                                description.includes('demo') ||
+                                description.includes('sample') ||
+                                description.includes('guide') ||
+                                name.includes('docs') ||
+                                name.includes('example') ||
+                                name.includes('demo') ||
+                                name.includes('tutorial');
+        
+        // Verificar repositórios de configuração ou dotfiles
+        const isConfigRepo = name.includes('dotfiles') ||
+                             name.includes('config') ||
+                             name.includes('settings') ||
+                             description.includes('configuration') ||
+                             description.includes('dotfiles');
+        
+        // CRITÉRIOS DE EXCLUSÃO (é biblioteca se):
+        // 1. Tem padrão forte no nome OU
+        // 2. Tem palavras fortes de biblioteca E não tem palavras de app OU  
+        // 3. É awesome list OU
+        // 4. É documentação/tutorial OU
+        // 5. É repositório de configuração
+        
+        const isLibrary = hasLibraryNamePattern || 
+                         (hasStrongLibraryKeywords && !hasAppKeywords) ||
+                         isAwesomeList ||
+                         isDocsOrTutorial ||
+                         isConfigRepo;
+        
+        // Log para debug (remover em produção se necessário)
+        if (isLibrary) {
+            const reasons = [];
+            if (hasLibraryNamePattern) reasons.push('nome suspeito');
+            if (hasStrongLibraryKeywords && !hasAppKeywords) reasons.push('palavras de biblioteca');
+            if (isAwesomeList) reasons.push('lista awesome');
+            if (isDocsOrTutorial) reasons.push('docs/tutorial');
+            if (isConfigRepo) reasons.push('configuração');
+            
+            console.log(`   📚 Biblioteca detectada (${reasons.join(', ')}): ${repo.full_name}`);
+        }
+        
+        return isLibrary;
     }
     
     async analyzeRepository(repo) {
@@ -214,8 +333,8 @@ class GitHubAccessibilityMiner {
             // Verificar arquivos de configuração
             await this.checkConfigFiles(owner, name, foundTools);
             
-            // Verificar package.json (mais comum)
-            await this.checkPackageJson(owner, name, foundTools);
+            // Verificar arquivos de dependências de todas as linguagens
+            await this.checkDependencyFiles(owner, name, foundTools);
             
             // Verificar workflows do GitHub
             await this.checkWorkflows(owner, name, foundTools);
@@ -264,15 +383,71 @@ class GitHubAccessibilityMiner {
         }
     }
     
-    async checkPackageJson(owner, name, foundTools) {
-        try {
-            const content = await this.getFileContent(owner, name, 'package.json');
-            if (content) {
-                console.log(`     📦 Analisando package.json`);
-                this.searchToolsInContent(content, foundTools);
+    async checkDependencyFiles(owner, name, foundTools) {
+        // Arquivos de dependências por linguagem/framework
+        const dependencyFiles = [
+            // JavaScript/Node.js
+            'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+            
+            // Python
+            'requirements.txt', 'requirements.in', 'Pipfile', 'Pipfile.lock', 
+            'pyproject.toml', 'setup.py', 'setup.cfg', 'poetry.lock',
+            
+            // PHP
+            'composer.json', 'composer.lock',
+            
+            // Java
+            'pom.xml', 'build.gradle', 'build.gradle.kts', 'gradle.properties',
+            
+            // C# / .NET
+            'packages.config', 'project.json', '*.csproj', '*.fsproj', '*.vbproj',
+            'Directory.Build.props', 'Directory.Packages.props',
+            
+            // Ruby
+            'Gemfile', 'Gemfile.lock', '*.gemspec',
+            
+            // Go
+            'go.mod', 'go.sum', 'Gopkg.toml', 'Gopkg.lock',
+            
+            // Rust
+            'Cargo.toml', 'Cargo.lock',
+            
+            // Dart/Flutter
+            'pubspec.yaml', 'pubspec.lock',
+            
+            // Swift
+            'Package.swift', 'Podfile', 'Podfile.lock',
+            
+            // Outros
+            'Makefile', 'CMakeLists.txt', 'meson.build'
+        ];
+        
+        for (const depFile of dependencyFiles) {
+            try {
+                // Para arquivos com wildcards (*.csproj), verificar conteúdo da pasta
+                if (depFile.includes('*')) {
+                    const extension = depFile.replace('*', '');
+                    const rootContents = await this.getRepositoryContents(owner, name);
+                    
+                    for (const file of rootContents) {
+                        if (file.name.endsWith(extension)) {
+                            const content = await this.getFileContent(owner, name, file.name);
+                            if (content) {
+                                console.log(`     📄 Analisando ${file.name}`);
+                                this.searchToolsInContent(content, foundTools);
+                            }
+                        }
+                    }
+                } else {
+                    const content = await this.getFileContent(owner, name, depFile);
+                    if (content) {
+                        console.log(`     📦 Analisando ${depFile}`);
+                        this.searchToolsInContent(content, foundTools);
+                    }
+                }
+            } catch (error) {
+                // Ignorar arquivos inexistentes
             }
-        } catch (error) {
-            // Ignorar se não existir
         }
     }
     
@@ -360,16 +535,84 @@ class GitHubAccessibilityMiner {
         console.log(`⏰ Timeout controlado pelo GitHub Actions (35791 minutos)\n`);
         
         const queries = [
-            'web application javascript typescript',
-            'react app vue app angular app',
-            'webapp frontend web-app',
-            'web dashboard admin panel',
-            'react application vue application', 
-            'angular application webapp',
-            'next.js app nuxt.js app',
-            'fullstack web application',
-            'spa single page application',
-            'web platform website app'
+            // Termos gerais de aplicação web
+            'website',
+            'site',
+            'web application',
+            'webapp',
+            'web app',
+            'website application',
+            'web platform',
+            'web portal',
+            'online application',
+            'web based application',
+            'web service',
+            'fullstack application',
+            'frontend application',
+            'single page application',
+            
+            // Tipos de aplicação por função
+            'dashboard application',
+            'admin panel',
+            'management system',
+            'control panel',
+            'monitoring dashboard',
+            'analytics dashboard',
+            
+            // E-commerce e vendas
+            'ecommerce application',
+            'online store',
+            'shopping application',
+            'marketplace application',
+            'retail application',
+            
+            // Sistemas de gestão
+            'crm application',
+            'erp application',
+            'cms application',
+            'content management',
+            'project management',
+            'task management',
+            
+            // Aplicações sociais e comunicação
+            'social application',
+            'chat application',
+            'messaging application',
+            'forum application',
+            'community platform',
+            
+            // Aplicações de conteúdo
+            'blog application',
+            'news application',
+            'media application',
+            'publishing platform',
+            'content platform',
+            
+            // Aplicações de negócio
+            'saas application',
+            'business application',
+            'enterprise application',
+            'corporate application',
+            'professional application',
+            
+            // Aplicações educacionais e pessoais
+            'learning platform',
+            'education application',
+            'portfolio application',
+            'personal application',
+            'productivity application',
+            
+            // Aplicações específicas populares
+            'todo application',
+            'calendar application',
+            'booking application',
+            'reservation system',
+            'inventory system',
+            'helpdesk application',
+            'ticketing system',
+            'survey application',
+            'form application',
+            'gallery application'
         ];
         
         const foundRepos = [];
