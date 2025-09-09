@@ -5,7 +5,8 @@ const path = require("path");
 class GitHubAccessibilityMiner {
   constructor() {
     this.token = process.env.GITHUB_TOKEN;
-    this.baseUrl = "https://api.github.com";
+    this.graphqlUrl = "https://api.github.com/graphql";
+    this.restUrl = "https://api.github.com";
     this.csvFile = "repositorios_acessibilidade.csv";
     this.processedReposFile = "processed_repos.json";
     this.processedRepos = this.loadProcessedRepos();
@@ -178,19 +179,21 @@ class GitHubAccessibilityMiner {
     }
   }
 
-  async makeRequest(url) {
+  async makeGraphQLRequest(query, variables = {}) {
     const options = {
+      method: "POST",
       headers: {
         "User-Agent": "GitHub-Accessibility-Miner-Action",
-        Accept: "application/vnd.github.v3+json",
-        Authorization: `token ${this.token}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.token}`,
       },
+      body: JSON.stringify({ query, variables }),
       timeout: 30000,
     };
 
-    const response = await fetch(url, options);
+    const response = await fetch(this.graphqlUrl, options);
 
-    // Verificar rate limit
+    // Verificar rate limit (GraphQL usa diferentes headers)
     const rateLimit = parseInt(response.headers.get("x-ratelimit-remaining"));
     const resetTime = parseInt(response.headers.get("x-ratelimit-reset"));
 
@@ -208,30 +211,136 @@ class GitHubAccessibilityMiner {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
+    const result = await response.json();
+    
+    if (result.errors) {
+      throw new Error(`GraphQL Error: ${JSON.stringify(result.errors)}`);
+    }
+
+    return result.data;
+  }
+
+  async makeRestRequest(url) {
+    const options = {
+      headers: {
+        "User-Agent": "GitHub-Accessibility-Miner-Action",
+        Accept: "application/vnd.github.v3+json",
+        Authorization: `token ${this.token}`,
+      },
+      timeout: 30000,
+    };
+
+    const response = await fetch(url, options);
+
+    // Verificar rate limit
+    const rateLimit = parseInt(response.headers.get("x-ratelimit-remaining"));
+    const resetTime = parseInt(response.headers.get("x-ratelimit-reset"));
+
+    if (rateLimit < 50) {
+      const waitTime = Math.max(resetTime * 1000 - Date.now() + 5000, 0);
+      console.log(
+        `⏳ Rate limit REST baixo (${rateLimit}), aguardando ${Math.ceil(
+          waitTime / 1000
+        )}s...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
     return await response.json();
   }
 
-  async searchRepositories(query, page = 1) {
-    const searchUrl = `${
-      this.baseUrl
-    }/search/repositories?q=${encodeURIComponent(
-      query
-    )}&sort=stars&order=desc&page=${page}&per_page=${this.perPage}`;
+  async searchRepositories(query, cursor = null) {
+    const graphqlQuery = `
+      query SearchRepositories($query: String!, $first: Int!, $after: String) {
+        search(query: $query, type: REPOSITORY, first: $first, after: $after) {
+          repositoryCount
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {
+            ... on Repository {
+              id
+              name
+              nameWithOwner
+              description
+              url
+              homepageUrl
+              stargazerCount
+              updatedAt
+              createdAt
+              primaryLanguage {
+                name
+              }
+              languages(first: 10) {
+                nodes {
+                  name
+                }
+              }
+              repositoryTopics(first: 20) {
+                nodes {
+                  topic {
+                    name
+                  }
+                }
+              }
+              owner {
+                login
+              }
+              defaultBranchRef {
+                name
+              }
+              isArchived
+              isFork
+              isPrivate
+              licenseInfo {
+                name
+              }
+            }
+          }
+        }
+        rateLimit {
+          remaining
+          resetAt
+        }
+      }
+    `;
+
+    const variables = {
+      query: `${query} sort:stars-desc`,
+      first: this.perPage,
+      after: cursor,
+    };
 
     try {
-      console.log(`🔍 Buscando: "${query}" - Página ${page}`);
-      return await this.makeRequest(searchUrl);
+      console.log(`🔍 Buscando GraphQL: "${query}"${cursor ? ` - Cursor: ${cursor.substring(0, 10)}...` : ''}`);
+      const data = await this.makeGraphQLRequest(graphqlQuery, variables);
+      
+      // Log do rate limit GraphQL
+      if (data.rateLimit) {
+        console.log(`   📊 Rate limit GraphQL: ${data.rateLimit.remaining} restantes`);
+      }
+      
+      return {
+        items: data.search.nodes || [],
+        pageInfo: data.search.pageInfo,
+        totalCount: data.search.repositoryCount
+      };
     } catch (error) {
-      console.log(`❌ Erro na busca: ${error.message}`);
+      console.log(`❌ Erro na busca GraphQL: ${error.message}`);
       throw error;
     }
   }
 
   async getRepositoryContents(owner, repo, path = "") {
-    const url = `${this.baseUrl}/repos/${owner}/${repo}/contents/${path}`;
+    const url = `${this.restUrl}/repos/${owner}/${repo}/contents/${path}`;
 
     try {
-      const contents = await this.makeRequest(url);
+      const contents = await this.makeRestRequest(url);
       return Array.isArray(contents) ? contents : [contents];
     } catch (error) {
       if (error.message.includes("404")) {
@@ -243,8 +352,8 @@ class GitHubAccessibilityMiner {
 
   async getFileContent(owner, repo, filePath) {
     try {
-      const content = await this.makeRequest(
-        `${this.baseUrl}/repos/${owner}/${repo}/contents/${filePath}`
+      const content = await this.makeRestRequest(
+        `${this.restUrl}/repos/${owner}/${repo}/contents/${filePath}`
       );
       if (content.content) {
         return Buffer.from(content.content, "base64").toString("utf8");
@@ -486,92 +595,244 @@ class GitHubAccessibilityMiner {
     return isLibrary;
   }
 
-async isWebApplication(repo) {
-const owner = repo.owner.login;
-const description = (repo.description || '').toLowerCase();
-const name = repo.name.toLowerCase();
-const topics = (repo.topics || []).map(t => t.toLowerCase());
-const homepage = (repo.homepage || '').toLowerCase();
+  isWebApplication(repo) {
+    const description = (repo.description || "").toLowerCase();
+    const name = repo.name.toLowerCase();
+    // Adaptar para GraphQL - topics vêm em formato diferente
+    const topics = repo.repositoryTopics 
+      ? repo.repositoryTopics.nodes.map(t => t.topic.name.toLowerCase())
+      : (repo.topics || []).map((t) => t.toLowerCase());
+    const homepage = (repo.homepageUrl || repo.homepage || "").toLowerCase();
 
-// Texto base
-let allContent = [description, name, topics.join(' '), homepage].join(' ');
+    // Combinar todas as informações
+    const allContent = [description, name, topics.join(" "), homepage].join(
+      " "
+    );
 
-// Palavras que CONFIRMAM aplicação web
-const webAppKeywords = [
-    'web application', 'web app', 'webapp', 'website', 'web platform',
-    'web portal', 'web interface', 'web service', 'online application',
-    'web based', 'browser based', 'online platform',
-    'dashboard', 'admin panel', 'control panel', 'management system',
-    'cms', 'content management', 'blog platform', 'forum',
-    'ecommerce', 'e-commerce', 'online store', 'shop', 'marketplace',
-    'social network', 'social platform', 'community platform',
-    'chat application', 'messaging app', 'communication platform',
-    'crm', 'erp', 'saas', 'business application',
-    'booking system', 'reservation system', 'ticketing system',
-    'learning platform', 'education platform', 'lms',
-    'portfolio site', 'personal website', 'company website',
-    'news site', 'media platform', 'publishing platform',
-    'frontend', 'backend', 'fullstack', 'full-stack',
-    'single page application', 'spa', 'progressive web app', 'pwa',
-    'responsive', 'mobile-first', 'cross-platform web',
-    'deployed', 'hosted', 'live demo', 'production',
-    'users', 'customers', 'clients', 'visitors'
-];
+    // Palavras que CONFIRMAM que é uma aplicação web
+    const webAppKeywords = [
+      // Tipos de aplicação
+      "web application",
+      "web app",
+      "webapp",
+      "website",
+      "web platform",
+      "web portal",
+      "web interface",
+      "web service",
+      "online application",
+      "web based",
+      "browser based",
+      "online platform",
 
-// Palavras que NEGAM aplicação
-const nonAppKeywords = [
-    'library', 'lib', 'component library', 'ui library', 'design system',
-    'components', 'widgets', 'elements', 'controls',
-    'framework', 'toolkit', 'sdk', 'api client', 'wrapper',
-    'tool', 'utility', 'util', 'helper', 'plugin', 'extension',
-    'cli', 'command line', 'script', 'automation',
-    'generator', 'builder', 'compiler', 'bundler',
-    'template', 'boilerplate', 'starter', 'seed', 'skeleton',
-    'scaffold', 'example', 'demo', 'sample', 'tutorial',
-    'documentation', 'docs', 'guide', 'learning',
-    'awesome', 'curated', 'collection', 'list of', 'resources',
-    'config', 'configuration', 'setup', 'dotfiles', 'settings'
-];
+      // Tipos específicos de aplicação
+      "dashboard",
+      "admin panel",
+      "control panel",
+      "management system",
+      "cms",
+      "content management",
+      "blog platform",
+      "forum",
+      "ecommerce",
+      "e-commerce",
+      "online store",
+      "shop",
+      "marketplace",
+      "social network",
+      "social platform",
+      "community platform",
+      "chat application",
+      "messaging app",
+      "communication platform",
+      "crm",
+      "erp",
+      "saas",
+      "business application",
+      "booking system",
+      "reservation system",
+      "ticketing system",
+      "learning platform",
+      "education platform",
+      "lms",
+      "portfolio site",
+      "personal website",
+      "company website",
+      "news site",
+      "media platform",
+      "publishing platform",
 
-// Verificação inicial
-let hasWebAppKeywords = webAppKeywords.some(keyword => allContent.includes(keyword));
-let hasNonAppKeywords = nonAppKeywords.some(keyword => allContent.includes(keyword));
+      // Indicadores técnicos de aplicação web
+      "frontend",
+      "backend",
+      "fullstack",
+      "full-stack",
+      "single page application",
+      "spa",
+      "progressive web app",
+      "pwa",
+      "responsive",
+      "mobile-first",
+      "cross-platform web",
 
-// 🔍 Se não for conclusivo, buscar README
-if (!hasWebAppKeywords || !hasNonAppKeywords) {
-    try {
-        const readme = await this.getReadmeContent(owner, repo.name);
-        if (readme) {
-            const readmeLower = readme.toLowerCase();
-            allContent += ' ' + readmeLower;
-            // Recalcular
-            hasWebAppKeywords = webAppKeywords.some(keyword => allContent.includes(keyword));
-            hasNonAppKeywords = nonAppKeywords.some(keyword => allContent.includes(keyword));
-        }
-    } catch (e) {
-        // Sem README, segue sem ele
+      // Contextos de uso
+      "deployed",
+      "hosted",
+      "live demo",
+      "production",
+      "users",
+      "customers",
+      "clients",
+      "visitors",
+    ];
+
+    // Palavras que NEGAM que é uma aplicação (bibliotecas, ferramentas, etc.)
+    const nonAppKeywords = [
+      // Bibliotecas e componentes
+      "library",
+      "lib",
+      "component library",
+      "ui library",
+      "design system",
+      "components",
+      "widgets",
+      "elements",
+      "controls",
+      "framework",
+      "toolkit",
+      "sdk",
+      "api client",
+      "wrapper",
+
+      // Ferramentas e utilitários
+      "tool",
+      "utility",
+      "util",
+      "helper",
+      "plugin",
+      "extension",
+      "cli",
+      "command line",
+      "script",
+      "automation",
+      "generator",
+      "builder",
+      "compiler",
+      "bundler",
+
+      // Templates e boilerplates
+      "template",
+      "boilerplate",
+      "starter",
+      "seed",
+      "skeleton",
+      "scaffold",
+      "example",
+      "demo",
+      "sample",
+      "tutorial",
+
+      // Documentação e recursos
+      "documentation",
+      "docs",
+      "guide",
+      "tutorial",
+      "learning",
+      "awesome",
+      "curated",
+      "collection",
+      "list of",
+      "resources",
+
+      // Configuração e setup
+      "config",
+      "configuration",
+      "setup",
+      "dotfiles",
+      "settings",
+    ];
+
+    // Verificar se tem palavras de aplicação web
+    const hasWebAppKeywords = webAppKeywords.some((keyword) =>
+      allContent.includes(keyword)
+    );
+
+    // Verificar se tem palavras que negam aplicação
+    const hasNonAppKeywords = nonAppKeywords.some((keyword) =>
+      allContent.includes(keyword)
+    );
+
+    // Verificar topics específicos que indicam aplicação
+    const webAppTopics = [
+      "webapp",
+      "web-app",
+      "website",
+      "web-application",
+      "dashboard",
+      "admin-panel",
+      "cms",
+      "ecommerce",
+      "e-commerce",
+      "saas",
+      "platform",
+      "portal",
+      "frontend",
+      "fullstack",
+      "spa",
+      "pwa",
+      "responsive",
+      "bootstrap",
+      "tailwind",
+    ];
+
+    const hasWebAppTopics = topics.some((topic) =>
+      webAppTopics.includes(topic)
+    );
+
+    // Verificar se tem homepage (aplicações geralmente têm)
+    const hasHomepage = homepage && homepage.includes("http");
+
+    // LÓGICA DE DECISÃO:
+    // É aplicação web se:
+    // 1. Tem palavras de aplicação web E não tem palavras que negam OU
+    // 2. Tem topics específicos de aplicação web OU
+    // 3. Tem homepage (indicativo de aplicação deployada)
+
+    const isWebApp =
+      (hasWebAppKeywords && !hasNonAppKeywords) ||
+      hasWebAppTopics ||
+      hasHomepage;
+
+    // Log para debug
+    if (!isWebApp) {
+      const reasons = [];
+      if (!hasWebAppKeywords) reasons.push("sem palavras de webapp");
+      if (hasNonAppKeywords)
+        reasons.push("tem palavras de biblioteca/ferramenta");
+      if (!hasWebAppTopics) reasons.push("sem topics de webapp");
+      if (!hasHomepage) reasons.push("sem homepage");
+
+      console.log(`   🔍 Não é webapp (${reasons.join(", ")})`);
+    } else {
+      const reasons = [];
+      if (hasWebAppKeywords && !hasNonAppKeywords)
+        reasons.push("palavras de webapp");
+      if (hasWebAppTopics) reasons.push("topics de webapp");
+      if (hasHomepage) reasons.push("tem homepage");
+
+      console.log(`   ✅ Confirmado como webapp (${reasons.join(", ")})`);
     }
-}
 
-// Lógica final
-const isWebApp = (hasWebAppKeywords && !hasNonAppKeywords);
-
-if (!isWebApp) {
-    const reasons = [];
-    if (!hasWebAppKeywords) reasons.push('sem palavras de webapp');
-    if (hasNonAppKeywords) reasons.push('tem palavras de biblioteca/ferramenta');
-    console.log(`   🔍 Não é webapp (${reasons.join(', ')})`);
-} else {
-    console.log(`   ✅ Confirmado como webapp`);
-}
-
-return isWebApp;
-}
+    return isWebApp;
+  }
 
   async checkRepositoryAbout(repo, foundTools) {
     const description = repo.description || "";
-    const topics = repo.topics || [];
-    const homepage = repo.homepage || "";
+    // Adaptar para GraphQL - topics vêm em formato diferente
+    const topics = repo.repositoryTopics 
+      ? repo.repositoryTopics.nodes.map(t => t.topic.name)
+      : (repo.topics || []);
+    const homepage = repo.homepageUrl || repo.homepage || "";
 
     // Combinar todas as informações do "about"
     const aboutContent = [description, topics.join(" "), homepage]
@@ -647,15 +908,15 @@ return isWebApp;
   async analyzeRepository(repo) {
     const owner = repo.owner.login;
     const name = repo.name;
-    const fullName = repo.full_name;
+    const fullName = repo.nameWithOwner || repo.full_name;
 
-    console.log(`🔬 Analisando: ${fullName} (⭐ ${repo.stargazers_count})`);
+    console.log(`🔬 Analisando: ${fullName} (⭐ ${repo.stargazerCount || repo.stargazers_count})`);
 
     try {
       // Verificar se é muito antigo
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      const lastUpdate = new Date(repo.updated_at);
+      const lastUpdate = new Date(repo.updatedAt || repo.updated_at);
 
       if (lastUpdate < oneYearAgo) {
         console.log(`   📅 Muito antigo, pulando...`);
@@ -706,8 +967,8 @@ return isWebApp;
 
         return {
           repository: fullName,
-          stars: repo.stargazers_count,
-          lastCommit: repo.updated_at,
+          stars: repo.stargazerCount || repo.stargazers_count,
+          lastCommit: repo.updatedAt || repo.updated_at,
           ...foundTools,
         };
       }
@@ -1078,7 +1339,7 @@ return isWebApp;
         }
 
         // Pausa entre consultas
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 750));
       } catch (error) {
         console.log(`❌ Erro na execução: ${error.message}`);
 
@@ -1086,7 +1347,7 @@ return isWebApp;
           console.log(`⏳ Rate limit atingido, aguardando 10 minutos...`);
           await new Promise((resolve) => setTimeout(resolve, 300000));
         } else {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          await new Promise((resolve) => setTimeout(resolve, 2000));
         }
 
         this.stats.errors++;
