@@ -205,7 +205,7 @@ class GitHubAccessibilityMiner {
             'cli tool', 'command line', 'npm package', 'node module',
             'plugin', 'extension', 'addon', 'middleware', 'utility',
             'utils', 'utilities', 'helper', 'helpers', 'sdk', 'api client',
-            'wrapper', 'binding', 'polyfill', 'shim', 'mock', 'stub'
+            'wrapper', 'binding', 'polyfill', 'shim', 'mock', 'stub', 'collection'
         ];
         
         // Padrões no nome que indicam bibliotecas
@@ -296,6 +296,192 @@ class GitHubAccessibilityMiner {
         return isLibrary;
     }
     
+    isWebApplication(repo) {
+        const description = (repo.description || '').toLowerCase();
+        const name = repo.name.toLowerCase();
+        const topics = (repo.topics || []).map(t => t.toLowerCase());
+        const homepage = (repo.homepage || '').toLowerCase();
+        
+        // Combinar todas as informações
+        const allContent = [description, name, topics.join(' '), homepage].join(' ');
+        
+        // Palavras que CONFIRMAM que é uma aplicação web
+        const webAppKeywords = [
+            // Tipos de aplicação
+            'web application', 'web app', 'webapp', 'website', 'web platform',
+            'web portal', 'web interface', 'web service', 'online application',
+            'web based', 'browser based', 'online platform',
+            
+            // Tipos específicos de aplicação
+            'dashboard', 'admin panel', 'control panel', 'management system',
+            'cms', 'content management', 'blog platform', 'forum',
+            'ecommerce', 'e-commerce', 'online store', 'shop', 'marketplace',
+            'social network', 'social platform', 'community platform',
+            'chat application', 'messaging app', 'communication platform',
+            'crm', 'erp', 'saas', 'business application',
+            'booking system', 'reservation system', 'ticketing system',
+            'learning platform', 'education platform', 'lms',
+            'portfolio site', 'personal website', 'company website',
+            'news site', 'media platform', 'publishing platform',
+            
+            // Indicadores técnicos de aplicação web
+            'frontend', 'backend', 'fullstack', 'full-stack',
+            'single page application', 'spa', 'progressive web app', 'pwa',
+            'responsive', 'mobile-first', 'cross-platform web',
+            
+            // Contextos de uso
+            'deployed', 'hosted', 'live demo', 'production',
+            'users', 'customers', 'clients', 'visitors'
+        ];
+        
+        // Palavras que NEGAM que é uma aplicação (bibliotecas, ferramentas, etc.)
+        const nonAppKeywords = [
+            // Bibliotecas e componentes
+            'library', 'lib', 'component library', 'ui library', 'design system',
+            'components', 'widgets', 'elements', 'controls',
+            'framework', 'toolkit', 'sdk', 'api client', 'wrapper',
+            
+            // Ferramentas e utilitários
+            'tool', 'utility', 'util', 'helper', 'plugin', 'extension',
+            'cli', 'command line', 'script', 'automation',
+            'generator', 'builder', 'compiler', 'bundler',
+            
+            // Templates e boilerplates
+            'template', 'boilerplate', 'starter', 'seed', 'skeleton',
+            'scaffold', 'example', 'demo', 'sample', 'tutorial',
+            
+            // Documentação e recursos
+            'documentation', 'docs', 'guide', 'tutorial', 'learning',
+            'awesome', 'curated', 'collection', 'list of', 'resources',
+            
+            // Configuração e setup
+            'config', 'configuration', 'setup', 'dotfiles', 'settings'
+        ];
+        
+        // Verificar se tem palavras de aplicação web
+        const hasWebAppKeywords = webAppKeywords.some(keyword => 
+            allContent.includes(keyword)
+        );
+        
+        // Verificar se tem palavras que negam aplicação
+        const hasNonAppKeywords = nonAppKeywords.some(keyword => 
+            allContent.includes(keyword)
+        );
+        
+        // Verificar topics específicos que indicam aplicação
+        const webAppTopics = [
+            'webapp', 'web-app', 'website', 'web-application',
+            'dashboard', 'admin-panel', 'cms', 'ecommerce', 'e-commerce',
+            'saas', 'platform', 'portal', 'frontend', 'fullstack',
+            'spa', 'pwa', 'responsive', 'bootstrap', 'tailwind'
+        ];
+        
+        const hasWebAppTopics = topics.some(topic => 
+            webAppTopics.includes(topic)
+        );
+        
+        // Verificar se tem homepage (aplicações geralmente têm)
+        const hasHomepage = homepage && homepage.includes('http');
+        
+        // LÓGICA DE DECISÃO:
+        // É aplicação web se:
+        // 1. Tem palavras de aplicação web E não tem palavras que negam OU
+        // 2. Tem topics específicos de aplicação web OU
+        // 3. Tem homepage (indicativo de aplicação deployada)
+        
+        const isWebApp = (hasWebAppKeywords && !hasNonAppKeywords) || 
+                        hasWebAppTopics || 
+                        hasHomepage;
+        
+        // Log para debug
+        if (!isWebApp) {
+            const reasons = [];
+            if (!hasWebAppKeywords) reasons.push('sem palavras de webapp');
+            if (hasNonAppKeywords) reasons.push('tem palavras de biblioteca/ferramenta');
+            if (!hasWebAppTopics) reasons.push('sem topics de webapp');
+            if (!hasHomepage) reasons.push('sem homepage');
+            
+            console.log(`   🔍 Não é webapp (${reasons.join(', ')})`);
+        } else {
+            const reasons = [];
+            if (hasWebAppKeywords && !hasNonAppKeywords) reasons.push('palavras de webapp');
+            if (hasWebAppTopics) reasons.push('topics de webapp');
+            if (hasHomepage) reasons.push('tem homepage');
+            
+            console.log(`   ✅ Confirmado como webapp (${reasons.join(', ')})`);
+        }
+        
+        return isWebApp;
+    }
+    
+    async checkRepositoryAbout(repo, foundTools) {
+        const description = repo.description || '';
+        const topics = repo.topics || [];
+        const homepage = repo.homepage || '';
+        
+        // Combinar todas as informações do "about"
+        const aboutContent = [
+            description,
+            topics.join(' '),
+            homepage
+        ].join(' ').toLowerCase();
+        
+        if (aboutContent.trim()) {
+            console.log(`     📋 Analisando descrição/about do repositório`);
+            
+            // Buscar ferramentas na descrição
+            this.searchToolsInContent(aboutContent, foundTools);
+            
+            // Verificar menções específicas de acessibilidade
+            const accessibilityKeywords = [
+                'accessibility', 'accessible', 'a11y', 'wcag', 'aria',
+                'screen reader', 'keyboard navigation', 'color contrast',
+                'accessibility testing', 'accessibility audit',
+                'accessibility compliance', 'web accessibility',
+                'inclusive design', 'universal design',
+                'disability', 'assistive technology'
+            ];
+            
+            const hasAccessibilityMention = accessibilityKeywords.some(keyword => 
+                aboutContent.includes(keyword)
+            );
+            
+            if (hasAccessibilityMention) {
+                console.log(`     ♿ Menção de acessibilidade encontrada na descrição`);
+                
+                // Se menciona acessibilidade, verificar mais profundamente
+                // Procurar por ferramentas mesmo que não estejam explícitas
+                const implicitTools = {
+                    'accessibility audit': ['AXE', 'Pa11y', 'Lighthouse'],
+                    'accessibility testing': ['AXE', 'Pa11y', 'WAVE'],
+                    'wcag compliance': ['AXE', 'AChecker', 'WAVE'],
+                    'a11y testing': ['AXE', 'Pa11y'],
+                    'accessibility scanner': ['AXE', 'WAVE', 'AChecker'],
+                    'color contrast': ['AXE', 'WAVE'],
+                    'screen reader': ['AXE', 'Pa11y']
+                };
+                
+                for (const [phrase, tools] of Object.entries(implicitTools)) {
+                    if (aboutContent.includes(phrase)) {
+                        tools.forEach(tool => {
+                            if (!foundTools[tool]) {
+                                console.log(`     🔍 ${tool} inferido por menção: "${phrase}"`);
+                                foundTools[tool] = true;
+                            }
+                        });
+                    }
+                }
+            }
+            
+            // A verificação de aplicação web já foi feita antes
+            
+            // Log dos topics se existirem
+            if (topics.length > 0) {
+                console.log(`     🏷️  Topics: ${topics.join(', ')}`);
+            }
+        }
+    }
+    
     async analyzeRepository(repo) {
         const owner = repo.owner.login;
         const name = repo.name;
@@ -314,9 +500,15 @@ class GitHubAccessibilityMiner {
                 return null;
             }
             
-            // Filtrar bibliotecas
+            // Filtrar bibliotecas usando nome, descrição e topics
             if (this.isLibraryRepository(repo)) {
-                console.log(`   📚 Biblioteca detectada, pulando...`);
+                console.log(`   📚 Biblioteca/ferramenta detectada, pulando...`);
+                return null;
+            }
+            
+            // Verificar se é realmente uma aplicação web usando o "about"
+            if (!this.isWebApplication(repo)) {
+                console.log(`   ❌ Não é uma aplicação web, pulando...`);
                 return null;
             }
             
@@ -329,6 +521,9 @@ class GitHubAccessibilityMiner {
                 'Asqatasun': false,
                 'HTML_CodeSniffer': false
             };
+            
+            // Verificar descrição/about do repositório
+            await this.checkRepositoryAbout(repo, foundTools);
             
             // Verificar arquivos de configuração
             await this.checkConfigFiles(owner, name, foundTools);
@@ -536,8 +731,6 @@ class GitHubAccessibilityMiner {
         
         const queries = [
             // Termos gerais de aplicação web
-            'website',
-            'site',
             'web application',
             'webapp',
             'web app',
