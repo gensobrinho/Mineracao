@@ -1274,71 +1274,89 @@ class GitHubAccessibilityMiner {
       "gallery application",
     ];
 
-    const foundRepos = [];
+     const foundRepos = [];
     let queryIndex = 0;
-    let currentPage = 1;
 
     // Loop contínuo até acabar o tempo
     while (this.shouldContinueRunning()) {
       try {
         const query = queries[queryIndex % queries.length];
+        console.log(`\n🔍 Consulta: "${query}"`);
 
-        console.log(`\n🔍 Consulta: "${query}" - Página ${currentPage}`);
+        // Usar cursor-based pagination (GraphQL)
+        let cursor = null;
+        let pageCount = 0;
 
-        const searchResult = await this.searchRepositories(query, currentPage);
+        do {
+          pageCount++;
+          console.log(
+            `   📄 Página ${pageCount}${cursor ? ` - Cursor: ${cursor.substring(0, 10)}...` : ""}`
+          );
 
-        if (!searchResult.items || searchResult.items.length === 0) {
-          console.log(`   📭 Sem resultados, próxima consulta...`);
-          queryIndex++;
-          currentPage = 1;
-          continue;
-        }
+          const searchResult = await this.searchRepositories(query, cursor);
 
-        for (const repo of searchResult.items) {
-          if (!this.shouldContinueRunning()) break;
-
-          this.stats.analyzed++;
-
-          if (this.processedRepos.has(repo.full_name)) {
-            this.stats.skipped++;
-            continue;
+          if (!searchResult.items || searchResult.items.length === 0) {
+            console.log(`   📭 Sem resultados nesta página.`);
+            break;
           }
 
-          const analysis = await this.analyzeRepository(repo);
+          for (const repo of searchResult.items) {
+            if (!this.shouldContinueRunning()) break;
 
-          if (analysis) {
-            foundRepos.push(analysis);
-            this.stats.saved++;
+            this.stats.analyzed++;
 
-            // Salvar em lotes de 5 para não perder dados
-            if (foundRepos.length >= 5) {
-              this.appendToCSV(foundRepos);
-              foundRepos.forEach((r) => this.processedRepos.add(r.repository));
-              this.saveProcessedRepos();
-              foundRepos.length = 0;
+            // Normalizar identificador do repositório para controle
+            const repoId =
+              repo.nameWithOwner || repo.full_name || `${repo.owner.login}/${repo.name}`;
+
+            if (this.processedRepos.has(repoId)) {
+              this.stats.skipped++;
+              continue;
             }
+
+            const analysis = await this.analyzeRepository(repo);
+
+            if (analysis) {
+              foundRepos.push(analysis);
+              this.stats.saved++;
+
+              // Salvar em lotes de 5
+              if (foundRepos.length >= 5) {
+                this.appendToCSV(foundRepos);
+                foundRepos.forEach((r) => this.processedRepos.add(r.repository));
+                this.saveProcessedRepos();
+                foundRepos.length = 0;
+              }
+            }
+
+            this.processedRepos.add(repoId);
+
+            // Mostrar progresso a cada 50 repositórios
+            if (this.stats.analyzed % 50 === 0) {
+              this.printProgress();
+            }
+
+            // Pausa pequena entre repositórios
+            await new Promise((resolve) => setTimeout(resolve, 75));
           }
 
-          this.processedRepos.add(repo.full_name);
-
-          // Mostrar progresso a cada 50 repositórios
-          if (this.stats.analyzed % 50 === 0) {
-            this.printProgress();
+          // Decidir se vamos para a próxima página (cursor)
+          if (
+            searchResult.pageInfo &&
+            searchResult.pageInfo.hasNextPage &&
+            pageCount < 10
+          ) {
+            cursor = searchResult.pageInfo.endCursor;
+            // pequena pausa entre páginas
+            await new Promise((resolve) => setTimeout(resolve, 750));
+          } else {
+            cursor = null; // encerra o loop de páginas para essa query
           }
+        } while (cursor && this.shouldContinueRunning());
 
-          // Pausa pequena
-          await new Promise((resolve) => setTimeout(resolve, 75));
-        }
-
-        // Próxima página ou query
-        if (searchResult.items.length === this.perPage && currentPage < 10) {
-          currentPage++;
-        } else {
-          queryIndex++;
-          currentPage = 1;
-        }
-
-        // Pausa entre consultas
+        // Avança para próxima query
+        queryIndex++;
+        // pequena pausa entre queries
         await new Promise((resolve) => setTimeout(resolve, 750));
       } catch (error) {
         console.log(`❌ Erro na execução: ${error.message}`);
@@ -1367,11 +1385,8 @@ class GitHubAccessibilityMiner {
     this.printProgress();
     console.log(`📄 Arquivo CSV: ${this.csvFile}`);
     console.log(`🗃️  Arquivo de controle: ${this.processedReposFile}`);
-    console.log(
-      `\n💡 Nota: Se foi interrompido por timeout do GitHub Actions, isso é normal!`
-    );
+    console.log(`\n💡 Nota: Se foi interrompido por timeout do GitHub Actions, isso é normal!`);
   }
-}
 
 // Executar
 const miner = new GitHubAccessibilityMiner();
