@@ -1387,6 +1387,7 @@ class GitHubAccessibilityMiner {
     console.log(`🗃️  Arquivo de controle: ${this.processedReposFile}`);
     console.log(`\n💡 Nota: Se foi interrompido por timeout do GitHub Actions, isso é normal!`);
   }
+}
 
 // Executar
 const miner = new GitHubAccessibilityMiner();
