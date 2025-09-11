@@ -186,7 +186,7 @@ class GitHubAccessibilityMiner {
         Authorization: `Bearer ${this.token}`,
       },
       body: JSON.stringify({ query, variables }),
-      timeout: 30000,
+      timeout: 20000,
     };
 
     const response = await fetch(this.graphqlUrl, options);
@@ -225,7 +225,7 @@ class GitHubAccessibilityMiner {
         Accept: "application/vnd.github.v3+json",
         Authorization: `token ${this.token}`,
       },
-      timeout: 30000,
+      timeout: 20000,
     };
 
     const response = await fetch(url, options);
@@ -1350,7 +1350,7 @@ class GitHubAccessibilityMiner {
             }
 
             // Pausa pequena entre repositórios
-            await new Promise((resolve) => setTimeout(resolve, 75));
+            await new Promise((resolve) => setTimeout(resolve, 50));
           }
 
           // Decidir se vamos para a próxima página (cursor)
@@ -1361,7 +1361,7 @@ class GitHubAccessibilityMiner {
           ) {
             cursor = searchResult.pageInfo.endCursor;
             // pequena pausa entre páginas
-            await new Promise((resolve) => setTimeout(resolve, 750));
+            await new Promise((resolve) => setTimeout(resolve, 500));
           } else {
             cursor = null; // encerra o loop de páginas para essa query
           }
@@ -1370,13 +1370,13 @@ class GitHubAccessibilityMiner {
         // Avança para próxima query
         queryIndex++;
         // pequena pausa entre queries
-        await new Promise((resolve) => setTimeout(resolve, 750));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       } catch (error) {
         console.log(`❌ Erro na execução: ${error.message}`);
 
         if (error.message.includes("rate limit")) {
           console.log(`⏳ Rate limit atingido, aguardando 10 minutos...`);
-          await new Promise((resolve) => setTimeout(resolve, 300000));
+          await new Promise((resolve) => setTimeout(resolve, 20000));
         } else {
           await new Promise((resolve) => setTimeout(resolve, 2000));
         }
