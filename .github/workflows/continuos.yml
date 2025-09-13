@@ -6,6 +6,8 @@ on:
     branches: 
       - main
       - master
+    paths:
+      - script.js
 
 jobs:
   run-forever:
