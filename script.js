@@ -10,7 +10,7 @@ class GitHubAccessibilityMiner {
     this.csvFile = "repositorios_acessibilidade.csv";
     this.processedReposFile = "processed_repos.json";
     this.processedRepos = this.loadProcessedRepos();
-    this.perPage = 100;
+    this.perPage = 50;
 
     // Sem controle de tempo interno - o GitHub Actions já controla com timeout-minutes: 35791
     this.startTime = Date.now();
@@ -177,7 +177,7 @@ class GitHubAccessibilityMiner {
     }
   }
 
-  async makeGraphQLRequest(query, variables = {}) {
+  async makeGraphQLRequest(query, variables = {}, retries = 3) {
     const options = {
       method: "POST",
       headers: {
@@ -189,33 +189,39 @@ class GitHubAccessibilityMiner {
       timeout: 30000,
     };
 
-    const response = await fetch(this.graphqlUrl, options);
+    try {
+      const response = await fetch(this.graphqlUrl, options);
 
-    // Verificar rate limit (GraphQL usa diferentes headers)
-    const rateLimit = parseInt(response.headers.get("x-ratelimit-remaining"));
-    const resetTime = parseInt(response.headers.get("x-ratelimit-reset"));
+      // Retry para erros temporários
+      if ([502, 503, 504].includes(response.status)) {
+        if (retries > 0) {
+          const waitTime = (4 - retries) * 5000; // espera crescente
+          console.log(`⚠️ Erro ${response.status}, tentando novamente em ${waitTime / 1000}s... (${retries} tentativas restantes)`);
+          await new Promise(res => setTimeout(res, waitTime));
+          return this.makeGraphQLRequest(query, variables, retries - 1);
+        } else {
+          console.log(`❌ Erro ${response.status} persistente, pulando esta busca.`);
+          return null; // retorna null para não travar
+        }
+      }
 
-    if (rateLimit < 100) {
-      const waitTime = Math.max(resetTime * 1000 - Date.now() + 5000, 0);
-      console.log(
-        `⏳ Rate limit baixo (${rateLimit}), aguardando ${Math.ceil(
-          waitTime / 1000
-        )}s...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
+      if (!response.ok) {
+        console.log(`❌ Erro HTTP ${response.status}: ${response.statusText}`);
+        return null;
+      }
+
+      const result = await response.json();
+
+      if (result.errors) {
+        console.log(`⚠️ Erro GraphQL: ${JSON.stringify(result.errors)}`);
+        return null;
+      }
+
+      return result.data;
+    } catch (error) {
+      console.log(`❌ Erro na requisição GraphQL: ${error.message}`);
+      return null;
     }
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-
-    if (result.errors) {
-      throw new Error(`GraphQL Error: ${JSON.stringify(result.errors)}`);
-    }
-
-    return result.data;
   }
 
   async makeRestRequest(url) {
@@ -348,6 +354,11 @@ class GitHubAccessibilityMiner {
         }`
       );
       const data = await this.makeGraphQLRequest(graphqlQuery, variables);
+
+      if (!data) {
+        console.log(`⚠️ Nenhum dado retornado para query "${query}", pulando...`);
+        return { items: [], pageInfo: { hasNextPage: false }, totalCount: 0 };
+      }
 
       // Log do rate limit GraphQL
       if (data.rateLimit) {
