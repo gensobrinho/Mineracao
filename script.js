@@ -1514,6 +1514,38 @@ class GitHubAccessibilityMiner {
     console.log(`💾 ${repositories.length} repositórios salvos no CSV`);
   }
 
+  quickToolScan(repo) {
+    const foundTools = {
+      AXE: false,
+      Pa11y: false,
+      WAVE: false,
+      AChecker: false,
+      Lighthouse: false,
+      Asqatasun: false,
+      HTML_CodeSniffer: false
+    };
+
+    // Combina descrição, topics e homepage
+    let topics = [];
+    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
+      topics = repo.repositoryTopics.nodes.map(n => (n?.topic?.name || ""));
+    } else if (Array.isArray(repo.topics)) {
+      topics = repo.topics.map(t => t || "");
+    }
+
+    const homepage = (repo.homepageUrl || repo.homepage || "");
+    const aboutContent = [
+      repo.description || "",
+      topics.join(" "),
+      homepage
+    ].join(" ").toLowerCase();
+
+    // Busca ferramentas na string combinada
+    this.searchToolsInContent(aboutContent, foundTools);
+
+    return foundTools;
+  }
+
   shouldContinueRunning() {
     // GitHub Actions controla o timeout automaticamente
     // Apenas continua executando até ser interrompido
