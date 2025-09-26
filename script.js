@@ -695,6 +695,277 @@ class GitHubAccessibilityMiner {
     };
   }
 
+  // Nova função para detectar frameworks web backend
+  async checkBackendFrameworks(owner, name) {
+    const frameworkChecks = [
+      // Ruby on Rails
+      {
+        files: ["config/routes.rb", "app/controllers/application_controller.rb", "Gemfile"],
+        keywords: ["rails", "ruby on rails"],
+        name: "Ruby on Rails",
+        score: 30
+      },
+      
+      // Django (Python)
+      {
+        files: ["manage.py", "settings.py", "urls.py", "wsgi.py"],
+        keywords: ["django", "python web"],
+        name: "Django",
+        score: 30
+      },
+      
+      // Laravel (PHP)
+      {
+        files: ["artisan", "composer.json", "routes/web.php", "app/Http/Controllers/Controller.php"],
+        keywords: ["laravel", "php framework"],
+        name: "Laravel",
+        score: 30
+      },
+      
+      // Express.js (Node.js)
+      {
+        files: ["package.json"],
+        keywords: ["express", "node.js web", "koa", "fastify"],
+        name: "Node.js Web Framework",
+        score: 25
+      },
+      
+      // Spring Boot (Java)
+      {
+        files: ["pom.xml", "build.gradle", "src/main/java"],
+        keywords: ["spring boot", "spring mvc", "java web"],
+        name: "Spring Boot",
+        score: 30
+      },
+      
+      // ASP.NET (C#)
+      {
+        files: ["Program.cs", "Startup.cs", "appsettings.json", "Controllers"],
+        keywords: ["asp.net", "dotnet", "c# web"],
+        name: "ASP.NET",
+        score: 30
+      },
+      
+      // Flask (Python)
+      {
+        files: ["app.py", "main.py", "requirements.txt"],
+        keywords: ["flask", "python microframework"],
+        name: "Flask",
+        score: 25
+      },
+      
+      // Symfony (PHP)
+      {
+        files: ["symfony.lock", "config/services.yaml", "src/Controller"],
+        keywords: ["symfony", "php symfony"],
+        name: "Symfony",
+        score: 30
+      }
+    ];
+
+    for (const framework of frameworkChecks) {
+      let foundFiles = 0;
+      let foundKeywords = false;
+
+      // Verificar arquivos específicos do framework
+      for (const file of framework.files) {
+        try {
+          const content = await this.getFileContent(owner, name, file);
+          if (content) {
+            foundFiles++;
+            
+            // Para package.json e Gemfile, verificar dependências específicas
+            if (file === "package.json" && content) {
+              const hasWebFramework = framework.keywords.some(keyword => 
+                content.toLowerCase().includes(keyword)
+              );
+              if (hasWebFramework) foundKeywords = true;
+            }
+            
+            if (file === "Gemfile" && content) {
+              const hasRails = content.toLowerCase().includes("rails");
+              if (hasRails) foundKeywords = true;
+            }
+            
+            if (file === "composer.json" && content) {
+              const hasLaravel = content.toLowerCase().includes("laravel");
+              if (hasLaravel) foundKeywords = true;
+            }
+          }
+        } catch (error) {
+          // Arquivo não existe, continua
+        }
+      }
+
+      // Verificar estrutura de pastas específicas
+      if (framework.name === "Ruby on Rails") {
+        try {
+          const appFolder = await this.getRepositoryContents(owner, name, "app");
+          const configFolder = await this.getRepositoryContents(owner, name, "config");
+          if (appFolder.length > 0 && configFolder.length > 0) {
+            foundFiles += 2;
+          }
+        } catch (error) {
+          // Pastas não existem
+        }
+      }
+
+      if (framework.name === "Django") {
+        try {
+          const hasManage = await this.getFileContent(owner, name, "manage.py");
+          if (hasManage && hasManage.includes("django")) {
+            foundKeywords = true;
+          }
+        } catch (error) {
+          // Arquivo não existe
+        }
+      }
+
+      // Se encontrou evidências suficientes do framework
+      if (foundFiles >= 2 || (foundFiles >= 1 && foundKeywords)) {
+        return {
+          score: framework.score,
+          framework: framework.name,
+          evidence: `${foundFiles} arquivos encontrados${foundKeywords ? " + dependências confirmadas" : ""}`
+        };
+      }
+    }
+
+    return { score: 0, framework: null };
+  }
+
+  // Nova função para detectar indicadores específicos de bibliotecas
+  async checkLibraryIndicators(owner, name) {
+    let penalty = 0;
+    const indicators = [];
+
+    // 1. Verificar package.json para bibliotecas NPM
+    try {
+      const packageJson = await this.getFileContent(owner, name, "package.json");
+      if (packageJson) {
+        const pkg = JSON.parse(packageJson);
+        
+        // Indicadores fortes de biblioteca NPM
+        if (pkg.main || pkg.module || pkg.exports) {
+          penalty += 20;
+          indicators.push("package.json com entry points de biblioteca");
+        }
+        
+        if (pkg.keywords && Array.isArray(pkg.keywords)) {
+          const libraryKeywords = ["library", "component", "utility", "helper", "tool", "cli", "framework"];
+          const hasLibKeywords = pkg.keywords.some(k => 
+            libraryKeywords.some(lk => k.toLowerCase().includes(lk))
+          );
+          if (hasLibKeywords) {
+            penalty += 15;
+            indicators.push("keywords de biblioteca no package.json");
+          }
+        }
+        
+        // Verificar se tem apenas devDependencies (típico de bibliotecas)
+        if (pkg.devDependencies && !pkg.dependencies) {
+          penalty += 10;
+          indicators.push("apenas devDependencies");
+        }
+        
+        // Scripts típicos de biblioteca
+        if (pkg.scripts) {
+          const libScripts = ["build", "prepublish", "prepare", "prepack"];
+          const hasLibScripts = libScripts.some(script => pkg.scripts[script]);
+          if (hasLibScripts && !pkg.scripts.start && !pkg.scripts.dev) {
+            penalty += 15;
+            indicators.push("scripts de build sem scripts de desenvolvimento");
+          }
+        }
+      }
+    } catch (error) {
+      // Não é JSON válido ou não existe
+    }
+
+    // 2. Verificar estrutura típica de biblioteca
+    try {
+      const rootContents = await this.getRepositoryContents(owner, name);
+      const fileNames = rootContents.map(f => f.name.toLowerCase());
+      
+      // Arquivos típicos de bibliotecas
+      const libraryFiles = [
+        "index.js", "index.ts", "lib/index.js", "src/index.js",
+        ".npmignore", "rollup.config.js", "webpack.config.js",
+        "tsconfig.json", ".babelrc", "jest.config.js"
+      ];
+      
+      const foundLibFiles = libraryFiles.filter(file => fileNames.includes(file));
+      if (foundLibFiles.length >= 3) {
+        penalty += 20;
+        indicators.push(`${foundLibFiles.length} arquivos típicos de biblioteca`);
+      }
+      
+      // Verificar se tem pasta dist/ ou build/ (bibliotecas compiladas)
+      if (fileNames.includes("dist") || fileNames.includes("build")) {
+        penalty += 10;
+        indicators.push("pasta de build/dist");
+      }
+    } catch (error) {
+      // Erro ao acessar repositório
+    }
+
+    // 3. Verificar README para padrões de biblioteca
+    try {
+      const readme = await this.getReadmeContent(owner, name);
+      if (readme) {
+        const readmeLower = readme.toLowerCase();
+        
+        // Padrões típicos de README de biblioteca
+        const libraryPatterns = [
+          "npm install", "yarn add", "import", "require(",
+          "installation", "usage", "api", "getting started",
+          "quick start", "how to use", "documentation"
+        ];
+        
+        const installPatterns = ["npm install", "yarn add", "pip install", "gem install"];
+        const hasInstallInstructions = installPatterns.some(pattern => 
+          readmeLower.includes(pattern)
+        );
+        
+        if (hasInstallInstructions) {
+          penalty += 25;
+          indicators.push("instruções de instalação no README");
+        }
+        
+        // Verificar se tem seção de API/Usage típica de biblioteca
+        if (readmeLower.includes("## api") || readmeLower.includes("## usage") || 
+            readmeLower.includes("## getting started")) {
+          penalty += 15;
+          indicators.push("documentação de API/Usage");
+        }
+      }
+    } catch (error) {
+      // Erro ao ler README
+    }
+
+    // 4. Verificar nome do repositório
+    const repoNameLower = name.toLowerCase();
+    const libraryNamePatterns = [
+      /^react-/, /^vue-/, /^angular-/, /^ng-/, /^@[^/]+\//,
+      /-lib$/, /-utils$/, /-helpers$/, /-tools$/, /-cli$/,
+      /^lib-/, /^utils-/, /^helper-/, /^tool-/
+    ];
+    
+    const hasLibraryNamePattern = libraryNamePatterns.some(pattern => 
+      pattern.test(repoNameLower)
+    );
+    
+    if (hasLibraryNamePattern) {
+      penalty += 20;
+      indicators.push("nome típico de biblioteca");
+    }
+
+    return {
+      penalty: Math.min(penalty, 60), // Máximo 60 pontos de penalização
+      indicators
+    };
+  }
+
   // Nova função para detectar arquivos de deploy
   async checkDeployFiles(owner, name) {
     const deployFiles = [
@@ -753,6 +1024,179 @@ class GitHubAccessibilityMiner {
       score: Math.min(deployScore, 35), // Máximo 35 pontos
       files: foundFiles
     };
+  }
+
+  // FASE 1: Verificar se é obviamente uma biblioteca
+  async isObviousLibrary(repo, owner, repoName) {
+    const reasons = [];
+    let libraryScore = 0;
+    
+    const description = (repo.description || "").toLowerCase();
+    const name = (repo.name || "").toLowerCase();
+
+    // 1. Padrões de nome óbvios
+    const libraryNamePatterns = [
+      /^react-/, /^vue-/, /^angular-/, /^@[^/]+\//, /-lib$/, /-utils$/, 
+      /-cli$/, /^lib-/, /^utils-/, /js-$/, /-js$/
+    ];
+    
+    if (libraryNamePatterns.some(pattern => pattern.test(name))) {
+      libraryScore += 3;
+      reasons.push("nome típico de biblioteca");
+    }
+
+    // 2. Palavras-chave definitivas na descrição
+    const obviousLibraryKeywords = [
+      "npm package", "javascript library", "react library", "vue library",
+      "cli tool", "utility library", "helper library", "component library"
+    ];
+    
+    const foundKeywords = obviousLibraryKeywords.filter(keyword => 
+      description.includes(keyword)
+    );
+    
+    if (foundKeywords.length > 0) {
+      libraryScore += foundKeywords.length * 2;
+      reasons.push(`palavras definitivas: ${foundKeywords.join(", ")}`);
+    }
+
+    // 3. Verificar package.json se disponível
+    if (owner && repoName) {
+      try {
+        const packageJson = await this.getFileContent(owner, repoName, "package.json");
+        if (packageJson) {
+          const pkg = JSON.parse(packageJson);
+          
+          // Entry points típicos de biblioteca
+          if (pkg.main || pkg.module || pkg.exports) {
+            libraryScore += 2;
+            reasons.push("entry points de biblioteca no package.json");
+          }
+          
+          // Keywords de biblioteca
+          if (pkg.keywords && Array.isArray(pkg.keywords)) {
+            const libKeywords = pkg.keywords.filter(k => 
+              ["library", "component", "utility", "helper", "cli"].some(lk => 
+                k.toLowerCase().includes(lk)
+              )
+            );
+            if (libKeywords.length > 0) {
+              libraryScore += 2;
+              reasons.push("keywords de biblioteca");
+            }
+          }
+        }
+      } catch (error) {
+        // Ignorar erros
+      }
+    }
+
+    return {
+      isLibrary: libraryScore >= 3, // Threshold baixo para ser conservador
+      reasons,
+      score: libraryScore
+    };
+  }
+
+  // FASE 2: Verificar evidências de aplicação web
+  async checkWebAppEvidences(repo, owner, repoName) {
+    const strong = [];
+    const medium = [];
+    
+    const description = (repo.description || "").toLowerCase();
+    const name = (repo.name || "").toLowerCase();
+    
+    // Adaptar topics
+    let topics = [];
+    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
+      topics = repo.repositoryTopics.nodes.map((n) => ((n && n.topic && n.topic.name) || "").toLowerCase());
+    } else if (Array.isArray(repo.topics)) {
+      topics = repo.topics.map((t) => (t || "").toLowerCase());
+    }
+    
+    const allContent = [description, name, topics.join(" ")].join(" ");
+
+    // EVIDÊNCIAS FORTES (1 é suficiente)
+    
+    // 1. Framework web backend
+    if (owner && repoName) {
+      try {
+        const frameworkCheck = await this.checkBackendFrameworks(owner, repoName);
+        if (frameworkCheck.score > 0) {
+          strong.push(`framework ${frameworkCheck.framework}`);
+        }
+      } catch (error) {}
+    }
+
+    // 2. Arquivos de deploy
+    if (owner && repoName) {
+      try {
+        const deployCheck = await this.checkDeployFiles(owner, repoName);
+        if (deployCheck.score >= 20) { // Deploy significativo
+          strong.push(`deploy: ${deployCheck.files.slice(0, 2).join(", ")}`);
+        }
+      } catch (error) {}
+    }
+
+    // 3. Palavras-chave muito específicas
+    const strongKeywords = [
+      "web application", "management system", "admin panel", "dashboard",
+      "project management", "issue tracking", "cms", "ecommerce"
+    ];
+    
+    const foundStrongKeywords = strongKeywords.filter(keyword => 
+      allContent.includes(keyword)
+    );
+    
+    if (foundStrongKeywords.length > 0) {
+      strong.push(`palavras específicas: ${foundStrongKeywords.slice(0, 2).join(", ")}`);
+    }
+
+    // EVIDÊNCIAS MÉDIAS (precisa de 2+)
+    
+    // 1. CSS/Frontend
+    if (owner && repoName) {
+      try {
+        const frontendCheck = await this.checkFrontendFiles(owner, repoName);
+        if (frontendCheck.score > 0) {
+          medium.push("arquivos CSS/frontend");
+        }
+      } catch (error) {}
+    }
+
+    // 2. Topics de webapp
+    const webAppTopics = [
+      "webapp", "web-app", "website", "dashboard", "cms", "saas", "platform"
+    ];
+    
+    const foundTopics = topics.filter(topic => webAppTopics.includes(topic));
+    if (foundTopics.length > 0) {
+      medium.push(`topics: ${foundTopics.join(", ")}`);
+    }
+
+    // 3. Palavras-chave gerais
+    const mediumKeywords = [
+      "website", "web platform", "frontend", "fullstack", "spa", "pwa"
+    ];
+    
+    const foundMediumKeywords = mediumKeywords.filter(keyword => 
+      allContent.includes(keyword)
+    );
+
+    if (foundMediumKeywords.length > 0) {
+      medium.push(`palavras gerais: ${foundMediumKeywords.slice(0, 2).join(", ")}`);
+    }
+
+    // 4. Homepage de aplicação
+    const homepage = (repo.homepageUrl || repo.homepage || "").toLowerCase();
+    if (homepage && homepage.includes("http")) {
+      const appPatterns = ["app.", "admin.", "dashboard.", "portal."];
+      if (appPatterns.some(pattern => homepage.includes(pattern))) {
+        medium.push("homepage de aplicação");
+      }
+    }
+
+    return { strong, medium };
   }
 
   // Nova função para análise inteligente de homepage
@@ -823,175 +1267,34 @@ class GitHubAccessibilityMiner {
     return { score: 5, reason: "homepage genérica" };
   }
 
-  // Nova função principal com sistema de pontuação
+  // Nova estratégia simplificada - Sistema Híbrido
   async isWebApplication(repo) {
-    const description = (repo.description || "").toLowerCase();
-    const name = (repo.name || "").toLowerCase();
-
-    // Adaptar para GraphQL - topics vêm em formato diferente
-    let topics = [];
-    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
-      topics = repo.repositoryTopics.nodes.map((n) => ((n && n.topic && n.topic.name) || "").toLowerCase());
-    } else if (Array.isArray(repo.topics)) {
-      topics = repo.topics.map((t) => (t || "").toLowerCase());
-    } else {
-      topics = [];
-    }
-
-    const homepage = (repo.homepageUrl || repo.homepage || "").toLowerCase();
-
-    // Combinar todas as informações
-    const allContent = [description, name, topics.join(" "), homepage].join(" ");
-
-    // Sistema de pontuação (0-100)
-    let score = 0;
-    const reasons = [];
-
-    // 1. ANÁLISE DE HOMEPAGE (peso: até 25 pontos ou -10 penalização)
-    const homepageAnalysis = this.analyzeHomepage(homepage, allContent);
-    score += homepageAnalysis.score;
-    if (homepageAnalysis.score !== 0) {
-      reasons.push(homepageAnalysis.reason);
-    }
-
-    // 2. PALAVRAS-CHAVE POSITIVAS (peso: até 40 pontos)
-    const strongWebAppKeywords = [
-      "web application", "web app", "webapp", "website", "web platform",
-      "dashboard", "admin panel", "management system", "cms", "ecommerce",
-      "e-commerce", "saas", "platform", "portal", "frontend", "fullstack",
-      "spa", "pwa", "deployed", "production", "live demo",
-      
-      // Indicadores de frontend/UI
-      "responsive design", "user interface", "ui/ux", "css", "scss", "sass",
-      "tailwind", "bootstrap", "material ui", "styled-components", "css-in-js",
-      "web design", "mobile responsive", "cross-browser", "interactive"
-    ];
-
-    const positiveKeywords = strongWebAppKeywords.filter(keyword => 
-      allContent.includes(keyword)
-    );
-
-    if (positiveKeywords.length > 0) {
-      const keywordScore = Math.min(positiveKeywords.length * 8, 40);
-      score += keywordScore;
-      reasons.push(`${positiveKeywords.length} palavras-chave de webapp (+${keywordScore})`);
-    }
-
-    // 3. TOPICS ESPECÍFICOS (peso: até 20 pontos)
-    const webAppTopics = [
-      "webapp", "web-app", "website", "web-application", "dashboard",
-      "admin-panel", "cms", "ecommerce", "e-commerce", "saas", "platform",
-      "portal", "frontend", "fullstack", "spa", "pwa"
-    ];
-
-    const matchingTopics = topics.filter(topic => webAppTopics.includes(topic));
-    
-    if (matchingTopics.length > 0) {
-      const topicScore = Math.min(matchingTopics.length * 10, 20);
-      score += topicScore;
-      reasons.push(`${matchingTopics.length} topics de webapp (+${topicScore})`);
-    }
-
-    // 4. PENALIZAÇÕES POR INDICADORES NEGATIVOS (peso: até -50 pontos)
-    const strongNegativeKeywords = [
-      "library", "lib", "component library", "ui library", "design system",
-      "framework", "toolkit", "sdk", "cli", "tool", "utility", "plugin",
-      "template", "boilerplate", "starter", "example", "demo", "tutorial",
-      "documentation", "docs", "guide", "awesome", "collection"
-    ];
-
-    const negativeKeywords = strongNegativeKeywords.filter(keyword => 
-      allContent.includes(keyword)
-    );
-
-    if (negativeKeywords.length > 0) {
-      const penalty = Math.min(negativeKeywords.length * 10, 50);
-      score -= penalty;
-      reasons.push(`${negativeKeywords.length} indicadores negativos (-${penalty})`);
-    }
-
-    // 5. BONUS POR CONTEXTO DE APLICAÇÃO (peso: até 15 pontos)
-    const contextKeywords = [
-      "users", "customers", "clients", "visitors", "hosted", "online",
-      "login", "register", "sign up", "authentication", "database"
-    ];
-
-    const contextMatches = contextKeywords.filter(keyword => 
-      allContent.includes(keyword)
-    );
-
-    if (contextMatches.length > 0) {
-      const contextScore = Math.min(contextMatches.length * 3, 15);
-      score += contextScore;
-      reasons.push(`contexto de aplicação (+${contextScore})`);
-    }
-
-    // 6. DETECÇÃO DE PROCESSOS DE DEPLOY (peso: até 30 pontos) - FORTE INDICADOR
-    const deployKeywords = [
-      // Plataformas de deploy
-      "heroku", "vercel", "netlify", "firebase", "aws", "azure", "gcp",
-      "docker", "kubernetes", "k8s", "deployment", "deploy", "deployed",
-      
-      // Arquivos/configurações de deploy
-      "dockerfile", "docker-compose", "procfile", "vercel.json", "netlify.toml",
-      "firebase.json", "app.yaml", "serverless", "terraform",
-      
-      // Processos de CI/CD
-      "github actions", "ci/cd", "continuous deployment", "auto deploy",
-      "build and deploy", "production deployment", "staging deployment",
-      
-      // Scripts e comandos de deploy
-      "npm run deploy", "yarn deploy", "build script", "production build",
-      "dist", "build folder", "static files"
-    ];
-
-    const deployMatches = deployKeywords.filter(keyword => 
-      allContent.includes(keyword)
-    );
-
-    if (deployMatches.length > 0) {
-      const deployScore = Math.min(deployMatches.length * 6, 30);
-      score += deployScore;
-      reasons.push(`${deployMatches.length} indicadores de deploy (+${deployScore})`);
-    }
-
-    // 7. VERIFICAÇÃO DE ARQUIVOS DE DEPLOY (peso: até 35 pontos) - EVIDÊNCIA CONCRETA
     const owner = (repo.owner && repo.owner.login) || "";
     const repoName = repo.name || "";
     
-    if (owner && repoName) {
-      try {
-        const deployFileCheck = await this.checkDeployFiles(owner, repoName);
-        if (deployFileCheck.score > 0) {
-          score += deployFileCheck.score;
-          reasons.push(`arquivos de deploy encontrados: ${deployFileCheck.files.join(", ")} (+${deployFileCheck.score})`);
-        }
-      } catch (error) {
-        // Ignorar erros na verificação de arquivos
-      }
+    // FASE 1: FILTROS ELIMINATÓRIOS - Se é obviamente uma biblioteca, rejeitar
+    const libraryCheck = await this.isObviousLibrary(repo, owner, repoName);
+    if (libraryCheck.isLibrary) {
+      console.log(`   📚 Biblioteca detectada: ${libraryCheck.reasons.join(", ")}`);
+      return false;
     }
 
-    // 8. VERIFICAÇÃO DE ARQUIVOS CSS/FRONTEND (peso: até 25 pontos) - INDICADOR DE UI
-    if (owner && repoName) {
-      try {
-        const frontendFileCheck = await this.checkFrontendFiles(owner, repoName);
-        if (frontendFileCheck.score > 0) {
-          score += frontendFileCheck.score;
-          reasons.push(`arquivos CSS/frontend encontrados: ${frontendFileCheck.files.join(", ")} (+${frontendFileCheck.score})`);
-        }
-      } catch (error) {
-        // Ignorar erros na verificação de arquivos
-      }
-    }
+    // FASE 2: EVIDÊNCIAS POSITIVAS - Precisa de pelo menos 1 evidência forte
+    const evidences = await this.checkWebAppEvidences(repo, owner, repoName);
+    
+    const hasStrongEvidence = evidences.strong.length > 0;
+    const hasMediumEvidence = evidences.medium.length >= 2;
+    
+    const isWebApp = hasStrongEvidence || hasMediumEvidence;
 
-    // DECISÃO FINAL: threshold de 30 pontos
-    const isWebApp = score >= 30;
-
-    // Log detalhado para debug
+    // Log simplificado
     if (!isWebApp) {
-      console.log(`   🔍 Não é webapp (score: ${score}/30) - ${reasons.join(", ") || "sem indicadores positivos"}`);
+      const allEvidences = [...evidences.strong, ...evidences.medium];
+      console.log(`   🔍 Não é webapp - evidências insuficientes: ${allEvidences.join(", ") || "nenhuma"}`);
     } else {
-      console.log(`   ✅ Confirmado como webapp (score: ${score}/30) - ${reasons.join(", ")}`);
+      const strongList = evidences.strong.length > 0 ? `FORTE: ${evidences.strong.join(", ")}` : "";
+      const mediumList = evidences.medium.length > 0 ? `MÉDIA: ${evidences.medium.join(", ")}` : "";
+      console.log(`   ✅ Confirmado como webapp - ${[strongList, mediumList].filter(x => x).join(" | ")}`);
     }
 
     return isWebApp;
