@@ -337,6 +337,7 @@ class GitHubAccessibilityMiner {
             stargazerCount
             updatedAt
             createdAt
+            pushedAt
             primaryLanguage {
               name
             }
@@ -992,35 +993,46 @@ class GitHubAccessibilityMiner {
     );
 
     try {
-      // Buscar o último commit após 1 de setembro de 2024
-      const minDate = new Date("2024-09-01T00:00:00Z");
-      let lastCommitDate = null;
+      // Verificar se o repositório está ativo baseado no pushedAt (último push)
+      const minDate = new Date("2024-01-01T00:00:00Z"); // Mais flexível: último ano
+      const pushedAt = repo.pushedAt ? new Date(repo.pushedAt) : null;
+      const createdAt = repo.createdAt ? new Date(repo.createdAt) : null;
+      
+      // Considera ativo se:
+      // 1. Foi criado nos últimos 2 anos, OU
+      // 2. Teve push nos últimos 12 meses, OU  
+      // 3. Tem mais de 10 stars (projetos populares mesmo que não atualizados)
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+      
+      const stars = repo.stargazerCount || repo.stargazers_count || 0;
+      const isRecentRepo = createdAt && createdAt >= twoYearsAgo;
+      const hasRecentPush = pushedAt && pushedAt >= minDate;
+      const isPopular = stars >= 10;
+      
+      if (!isRecentRepo && !hasRecentPush && !isPopular) {
+        const lastPushStr = pushedAt ? pushedAt.toLocaleDateString('pt-BR') : 'nunca';
+        console.log(`   📅 Repositório inativo (último push: ${lastPushStr}, ${stars} ⭐), pulando...`);
+        return null;
+      }
+      
+      // Buscar informações do último commit para registro
+      let lastCommitDate = pushedAt;
+      let lastCommitSha = null;
       try {
-        // Buscar branch principal
         const branch = (repo.defaultBranchRef && repo.defaultBranchRef.name) || "main";
-        const commitsUrl = `${this.restUrl}/repos/${owner}/${name}/commits?sha=${branch}&per_page=5`;
+        const commitsUrl = `${this.restUrl}/repos/${owner}/${name}/commits?sha=${branch}&per_page=1`;
         const commits = await this.makeRestRequest(commitsUrl);
-        if (Array.isArray(commits)) {
-          for (const commit of commits) {
-            const dateStr = commit.commit && commit.commit.committer && commit.commit.committer.date;
-            if (dateStr) {
-              const commitDate = new Date(dateStr);
-              if (commitDate >= minDate) {
-                if (!lastCommitDate || commitDate > lastCommitDate) {
-                  lastCommitDate = commitDate;
-                  lastCommitSha = commit.sha;
-                }
-              }
-            }
+        if (Array.isArray(commits) && commits.length > 0) {
+          const commit = commits[0];
+          const dateStr = commit.commit && commit.commit.committer && commit.commit.committer.date;
+          if (dateStr) {
+            lastCommitDate = new Date(dateStr);
+            lastCommitSha = commit.sha;
           }
         }
       } catch (e) {
-        // Ignorar erro, segue sem commit
-      }
-
-      if (!lastCommitDate) {
-        console.log(`   📅 Sem commit recente após 01/09/2024, pulando...`);
-        return null;
+        // Usar pushedAt se não conseguir buscar commits
       }
 
       // Filtrar bibliotecas usando nome, descrição e topics
@@ -1066,7 +1078,7 @@ class GitHubAccessibilityMiner {
         return {
           repository: fullName,
           stars: repo.stargazerCount || repo.stargazers_count || 0,
-          lastCommit: lastCommitDate.toISOString(),
+          lastCommit: lastCommitDate ? lastCommitDate.toISOString() : (pushedAt ? pushedAt.toISOString() : new Date().toISOString()),
           ...foundTools,
         };
       }
