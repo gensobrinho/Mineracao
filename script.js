@@ -5,7 +5,7 @@ const path = require("path");
 class GitHubAccessibilityMiner {
   constructor() {
     this.tokens = [
-      process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN,
     ].filter(Boolean);
     this.tokenIndex = 0;
     this.token = this.tokens[0];
