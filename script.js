@@ -983,6 +983,533 @@ class GitHubAccessibilityMiner {
     }
   }
 
+  // 1. FILTRO RÁPIDO DE WEBAPP (sem REST) - usando apenas dados GraphQL
+  checkBasicWebAppIndicators(repo) {
+    const name = (repo.name || "").toLowerCase();
+    const description = (repo.description || "").toLowerCase();
+    
+    // Extrair topics
+    const topics = [];
+    if (repo.repositoryTopics && repo.repositoryTopics.nodes) {
+      repo.repositoryTopics.nodes.forEach(topicNode => {
+        if (topicNode.topic && topicNode.topic.name) {
+          topics.push(topicNode.topic.name.toLowerCase());
+        }
+      });
+    }
+    const topicsText = topics.join(" ");
+
+    // Texto combinado para análise
+    const searchText = `${name} ${description} ${topicsText}`;
+
+    // DETECTAR BIBLIOTECAS ÓBVIAS (eliminatórias)
+    const obviousLibraryPatterns = [
+      // Padrões de nome
+      /^(lib|libs)-/,
+      /-lib$/,
+      /-library$/,
+      /^react-/,
+      /^vue-/,
+      /^angular-/,
+      /^jquery-/,
+      /-component$/,
+      /-components$/,
+      /^ui-/,
+      /-ui$/,
+      /^css-/,
+      /-css$/,
+      /^npm-/,
+      /-npm$/,
+      /^node-/,
+      /-node$/,
+      /^js-/,
+      /-js$/,
+      /^webpack-/,
+      /^babel-/,
+      /^eslint-/,
+      /-plugin$/,
+      /-plugins$/,
+      /-utils$/,
+      /-util$/,
+      /-helpers$/,
+      /-helper$/,
+      /-toolkit$/,
+      /-sdk$/,
+      /-api$/,
+      /-client$/,
+      /-wrapper$/,
+    ];
+
+    // Verificar padrões de nome
+    if (obviousLibraryPatterns.some(pattern => pattern.test(name))) {
+      console.log(`   📚 Padrão de biblioteca detectado no nome: ${name}`);
+      return { isWebApp: false, reason: "biblioteca por padrão de nome" };
+    }
+
+    // Keywords que DEFINITIVAMENTE indicam bibliotecas
+    const strongLibraryKeywords = [
+      "npm package",
+      "node module", 
+      "javascript library",
+      "react library",
+      "vue library",
+      "angular library",
+      "css library",
+      "ui library",
+      "component library",
+      "design system",
+      "ui components",
+      "react components",
+      "vue components",
+      "framework",
+      "boilerplate",
+      "template",
+      "starter kit",
+      "cli tool",
+      "command line",
+      "plugin",
+      "extension",
+      "middleware",
+      "utility",
+      "utils",
+      "helper",
+      "sdk",
+      "api client",
+      "wrapper",
+      "polyfill",
+    ];
+
+    if (strongLibraryKeywords.some(keyword => searchText.includes(keyword))) {
+      console.log(`   📚 Keywords de biblioteca detectadas`);
+      return { isWebApp: false, reason: "biblioteca por keywords" };
+    }
+
+    // DETECTAR WEBAPPS POR KEYWORDS FORTES
+    const strongWebAppKeywords = [
+      // Tipos específicos de aplicação
+      "web application",
+      "web app", 
+      "webapp",
+      "website",
+      "dashboard",
+      "admin panel",
+      "control panel",
+      "management system",
+      "cms",
+      "content management",
+      "blog platform",
+      "ecommerce",
+      "e-commerce", 
+      "online store",
+      "shop",
+      "marketplace",
+      "social network",
+      "social platform",
+      "chat application",
+      "forum",
+      "crm",
+      "erp",
+      "saas",
+      "booking system",
+      "ticketing system",
+      "learning platform",
+      "lms",
+      "portfolio site",
+      "company website",
+      "news site",
+      "media platform",
+
+      // Topics específicos que confirmam webapp
+      "frontend",
+      "fullstack",
+      "full-stack", 
+      "single page application",
+      "spa",
+      "progressive web app",
+      "pwa",
+      "deployed",
+      "hosted",
+      "live demo",
+      "production",
+    ];
+
+    const hasStrongWebAppIndicators = strongWebAppKeywords.some(keyword => 
+      searchText.includes(keyword)
+    );
+
+    // Topics específicos que indicam webapp
+    const webAppTopics = [
+      "webapp",
+      "web-app", 
+      "website",
+      "web-application",
+      "dashboard",
+      "admin-panel",
+      "cms",
+      "ecommerce",
+      "e-commerce",
+      "saas",
+      "platform",
+      "portal", 
+      "frontend",
+      "fullstack",
+      "spa",
+      "pwa",
+    ];
+
+    const hasWebAppTopics = topics.some(topic => webAppTopics.includes(topic));
+
+    // Homepage (webapps geralmente têm)
+    const homepage = (repo.homepageUrl || "").toLowerCase();
+    const hasHomepage = !!(homepage && homepage.includes("http"));
+
+    if (hasStrongWebAppIndicators || hasWebAppTopics) {
+      console.log(`   ✅ Indicadores fortes de webapp detectados`);
+      return { isWebApp: true, reason: "indicadores fortes de webapp" };
+    }
+
+    if (hasHomepage) {
+      console.log(`   ✅ Homepage presente - possível webapp`);
+      return { isWebApp: true, reason: "tem homepage" };
+    }
+
+    // Se chegou aqui: não tem sinais claros, precisa de verificação mais profunda
+    console.log(`   🤔 Sinais ambíguos - precisa verificação detalhada`);
+    return { isWebApp: null, reason: "ambíguo" };
+  }
+
+  // 2. DETECÇÃO RÁPIDA DE FERRAMENTAS (Quick Scan) - incluindo arquivos chave
+  async quickToolScan(repo) {
+    const description = (repo.description || "").toLowerCase();
+    const homepageUrl = (repo.homepageUrl || "").toLowerCase();
+    
+    // Extrair topics
+    const topics = [];
+    if (repo.repositoryTopics && repo.repositoryTopics.nodes) {
+      repo.repositoryTopics.nodes.forEach(topicNode => {
+        if (topicNode.topic && topicNode.topic.name) {
+          topics.push(topicNode.topic.name.toLowerCase());
+        }
+      });
+    }
+    const topicsText = topics.join(" ");
+
+    // Texto combinado para busca
+    const searchText = `${description} ${homepageUrl} ${topicsText}`;
+
+    // ETAPA 2A: Verificar descrição/topics primeiro
+    const foundTools = {
+      AXE: false,
+      Pa11y: false,
+      WAVE: false,
+      AChecker: false,
+      Lighthouse: false,
+      Asqatasun: false,
+      HTML_CodeSniffer: false,
+    };
+
+    // Buscar ferramentas na descrição/topics
+    this.searchToolsInContent(searchText, foundTools);
+
+    // Se encontrou algo óbvio, retornar true
+    if (Object.values(foundTools).some(tool => tool)) {
+      const toolsFound = Object.keys(foundTools).filter(key => foundTools[key]);
+      console.log(`   🔍 Quick scan (descrição): ${toolsFound.join(", ")}`);
+      return true;
+    }
+
+    // ETAPA 2B: Verificar arquivos chave rapidamente
+    const owner = (repo.owner && repo.owner.login) || "";
+    const name = repo.name || "";
+    
+    // Lista de arquivos prioritários para quick scan
+    const quickScanFiles = [
+      "package.json",        // Node.js dependencies
+      ".github/workflows/ci.yml",  // Common CI workflow
+      ".github/workflows/test.yml", // Common test workflow  
+      ".github/workflows/main.yml", // Common main workflow
+    ];
+
+    let foundInFiles = false;
+    
+    for (const filePath of quickScanFiles) {
+      try {
+        const content = await this.getFileContent(owner, name, filePath);
+        if (content) {
+          console.log(`   🔍 Quick scan: Verificando ${filePath}...`);
+          
+          // Reset foundTools para esta verificação
+          const fileFoundTools = {
+            AXE: false,
+            Pa11y: false,
+            WAVE: false,
+            AChecker: false,
+            Lighthouse: false,
+            Asqatasun: false,
+            HTML_CodeSniffer: false,
+          };
+          
+          // Usar searchToolsInContent para encontrar ferramentas
+          this.searchToolsInContent(content, fileFoundTools);
+          
+          if (Object.values(fileFoundTools).some(tool => tool)) {
+            const toolsFound = Object.keys(fileFoundTools).filter(key => fileFoundTools[key]);
+            console.log(`   🔍 Quick scan (${filePath}): ${toolsFound.join(", ")}`);
+            foundInFiles = true;
+            break; // Encontrou, não precisa verificar outros arquivos
+          }
+          
+          // Para package.json, também verificar se é projeto web moderno
+          if (filePath === "package.json") {
+            try {
+              const pkg = JSON.parse(content);
+              const webDevKeywords = [
+                "react", "vue", "angular", "svelte", "next", "nuxt", "gatsby",
+                "express", "fastify", "koa", "nestjs",
+                "webpack", "vite", "parcel", "rollup",
+                "jest", "cypress", "playwright", "testing-library",
+                "eslint", "prettier", "typescript"
+              ];
+              
+              const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
+              const hasWebDevDeps = Object.keys(dependencies).some(dep => 
+                webDevKeywords.some(keyword => dep.includes(keyword))
+              );
+              
+              if (hasWebDevDeps) {
+                console.log(`   🔍 Quick scan: Projeto web moderno detectado em package.json`);
+                foundInFiles = true;
+                break;
+              }
+            } catch (e) {
+              // Continuar se package.json não for válido
+            }
+          }
+        }
+      } catch (e) {
+        // Arquivo não existe, continuar
+      }
+    }
+
+    if (foundInFiles) {
+      return true;
+    }
+
+    // ETAPA 2C: Se não encontrou workflows comuns, verificar se existe pasta de workflows
+    try {
+      const workflows = await this.getRepositoryContents(owner, name, ".github/workflows");
+      if (workflows && workflows.length > 0) {
+        console.log(`   🔍 Quick scan: Verificando workflows existentes...`);
+        
+        // Verificar até 3 workflows para não ser muito pesado
+        const workflowsToCheck = workflows.slice(0, 3);
+        
+        for (const workflow of workflowsToCheck) {
+          const workflowName = (workflow && workflow.name) || "";
+          if (workflowName.endsWith(".yml") || workflowName.endsWith(".yaml")) {
+            try {
+              const content = await this.getFileContent(owner, name, workflow.path);
+              if (content) {
+                const workflowFoundTools = {
+                  AXE: false,
+                  Pa11y: false,
+                  WAVE: false,
+                  AChecker: false,
+                  Lighthouse: false,
+                  Asqatasun: false,
+                  HTML_CodeSniffer: false,
+                };
+                
+                this.searchToolsInContent(content, workflowFoundTools);
+                
+                if (Object.values(workflowFoundTools).some(tool => tool)) {
+                  const toolsFound = Object.keys(workflowFoundTools).filter(key => workflowFoundTools[key]);
+                  console.log(`   🔍 Quick scan (${workflowName}): ${toolsFound.join(", ")}`);
+                  return true;
+                }
+              }
+            } catch (e) {
+              // Continuar com próximo workflow
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Sem workflows, continuar
+    }
+
+    // ETAPA 2D: Fallback conservador baseado em indicadores gerais
+    const webDevKeywords = [
+      // Frameworks web
+      "react", "vue", "angular", "svelte", "next", "nuxt",
+      "express", "django", "flask", "rails",
+      // Tecnologias frontend
+      "javascript", "typescript", "html", "css",
+      "webpack", "vite", "frontend", "fullstack",
+      // Testing que pode incluir a11y
+      "testing", "jest", "cypress", "playwright",
+      // Qualidade/CI que pode incluir a11y
+      "quality", "ci", "continuous-integration", "github-actions",
+      "eslint", "prettier"
+    ];
+
+    const hasWebDevIndicator = webDevKeywords.some(keyword => 
+      searchText.includes(keyword)
+    );
+
+    if (hasWebDevIndicator) {
+      console.log(`   🔍 Quick scan: Indicadores gerais de web development - prosseguindo`);
+      return true;
+    }
+
+    console.log(`   ❌ Quick scan: Nenhum indicador relevante encontrado`);
+    return false;
+  }
+
+  // 3. VERIFICAÇÃO DETALHADA DE WEBAPP (com REST) - PRIORIDADE MÁXIMA
+  async isRealWebApplication(repo) {
+    const owner = (repo.owner && repo.owner.login) || "";
+    const name = repo.name || "";
+    
+    console.log(`   🔍 Verificação detalhada de webapp...`);
+
+    try {
+      // 1. Buscar arquivos na raiz para detectar tipo de projeto
+      const rootFiles = await this.getRepositoryContents(owner, name);
+      const fileNames = rootFiles.map(f => f.name.toLowerCase());
+
+      // INDICADORES FORTES DE WEBAPP
+      const webAppFiles = [
+        "index.html",
+        "public/index.html", 
+        "src/index.html",
+        "app.html",
+        "main.html",
+        "home.html",
+        "index.php",
+        "app.php",
+        "main.php",
+        "index.jsx",
+        "app.jsx",
+        "index.tsx", 
+        "app.tsx",
+        "app.js",
+        "main.js",
+        "index.js",
+        "server.js",
+        "app.py",
+        "main.py",
+        "manage.py", // Django
+        "wsgi.py",
+        "asgi.py",
+      ];
+
+      const hasWebAppFiles = webAppFiles.some(file => 
+        fileNames.some(fn => fn.includes(file))
+      );
+
+      // INDICADORES DE FRAMEWORK WEB
+      const webFrameworkIndicators = [
+        "package.json", // Node.js
+        "requirements.txt", // Python
+        "composer.json", // PHP
+        "gemfile", // Ruby
+        "go.mod", // Go
+        "cargo.toml", // Rust
+        "pom.xml", // Java Maven
+        "build.gradle", // Java Gradle
+      ];
+
+      const hasFrameworkFiles = webFrameworkIndicators.some(file => 
+        fileNames.includes(file)
+      );
+
+      // 2. Se tem package.json, verificar se é webapp Node.js
+      if (fileNames.includes("package.json")) {
+        try {
+          const packageJson = await this.getFileContent(owner, name, "package.json");
+          if (packageJson) {
+            const pkg = JSON.parse(packageJson);
+            
+            // Scripts que indicam webapp
+            const webAppScripts = ["start", "serve", "dev", "build", "deploy"];
+            const hasWebAppScripts = webAppScripts.some(script => 
+              pkg.scripts && pkg.scripts[script]
+            );
+
+            // Dependências que indicam webapp frontend
+            const frontendDeps = [
+              "react", "vue", "angular", "svelte", "next", "nuxt", "gatsby", 
+              "webpack", "vite", "parcel", "rollup", "express", "fastify", 
+              "koa", "hapi", "nestjs", "bootstrap", "tailwind", "material-ui",
+              "styled-components", "emotion", "chakra-ui"
+            ];
+
+            const dependencies = {
+              ...pkg.dependencies, 
+              ...pkg.devDependencies
+            };
+
+            const hasFrontendDeps = frontendDeps.some(dep => 
+              Object.keys(dependencies).some(key => key.includes(dep))
+            );
+
+            if (hasWebAppScripts || hasFrontendDeps) {
+              console.log(`   ✅ Confirmado: webapp Node.js`);
+              return true;
+            }
+          }
+        } catch (e) {
+          // Continuar verificação mesmo se package.json der erro
+        }
+      }
+
+      // 3. Se tem requirements.txt, verificar se é webapp Python
+      if (fileNames.includes("requirements.txt")) {
+        try {
+          const requirements = await this.getFileContent(owner, name, "requirements.txt");
+          if (requirements) {
+            const pythonWebFrameworks = [
+              "django", "flask", "fastapi", "tornado", "pyramid", 
+              "bottle", "cherrypy", "falcon", "sanic", "quart", "starlette"
+            ];
+
+            const hasWebFramework = pythonWebFrameworks.some(framework => 
+              requirements.toLowerCase().includes(framework)
+            );
+
+            if (hasWebFramework) {
+              console.log(`   ✅ Confirmado: webapp Python`);
+              return true;
+            }
+          }
+        } catch (e) {
+          // Continuar verificação
+        }
+      }
+
+      // 4. Verificar estrutura de pastas típica de webapp
+      const webAppFolders = ["public", "src", "app", "views", "templates", "static", "assets"];
+      const hasWebAppFolders = webAppFolders.some(folder => 
+        fileNames.includes(folder)
+      );
+
+      // 5. DECISÃO FINAL
+      if (hasWebAppFiles || (hasFrameworkFiles && hasWebAppFolders)) {
+        console.log(`   ✅ Confirmado: estrutura de webapp detectada`);
+        return true;
+      }
+
+      console.log(`   ❌ Não confirmado como webapp após verificação detalhada`);
+      return false;
+
+    } catch (error) {
+      console.log(`   ⚠️ Erro na verificação detalhada: ${error.message}`);
+      // Em caso de erro, ser conservador e assumir que pode ser webapp
+      return true;
+    }
+  }
+
   async analyzeRepository(repo) {
     const owner = (repo.owner && repo.owner.login) || "";
     const name = repo.name || "";
@@ -993,15 +1520,11 @@ class GitHubAccessibilityMiner {
     );
 
     try {
-      // Verificar se o repositório está ativo baseado no pushedAt (último push)
-      const minDate = new Date("2024-01-01T00:00:00Z"); // Mais flexível: último ano
+      // ETAPA 0: Verificar se o repositório está ativo
+      const minDate = new Date("2024-01-01T00:00:00Z");
       const pushedAt = repo.pushedAt ? new Date(repo.pushedAt) : null;
       const createdAt = repo.createdAt ? new Date(repo.createdAt) : null;
       
-      // Considera ativo se:
-      // 1. Foi criado nos últimos 2 anos, OU
-      // 2. Teve push nos últimos 12 meses, OU  
-      // 3. Tem mais de 10 stars (projetos populares mesmo que não atualizados)
       const twoYearsAgo = new Date();
       twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
       
@@ -1015,7 +1538,44 @@ class GitHubAccessibilityMiner {
         console.log(`   📅 Repositório inativo (último push: ${lastPushStr}, ${stars} ⭐), pulando...`);
         return null;
       }
+
+      // ETAPA 1: FILTRO RÁPIDO DE WEBAPP (sem REST)
+      console.log(`   🔍 Etapa 1: Verificação rápida de webapp...`);
+      const webAppCheck = this.checkBasicWebAppIndicators(repo);
       
+      if (webAppCheck.isWebApp === false) {
+        console.log(`   📚 Não é webapp (${webAppCheck.reason}), pulando...`);
+        return null;
+      }
+
+      // ETAPA 2: DETECÇÃO RÁPIDA DE FERRAMENTAS (Quick Scan)
+      console.log(`   🔍 Etapa 2: Busca rápida de ferramentas...`);
+      if (!await this.quickToolScan(repo)) {
+        console.log(`   ❌ Nenhuma ferramenta detectada no quick scan, pulando...`);
+        return null;
+      }
+
+      // ETAPA 3: VERIFICAÇÕES DETALHADAS COM REST (apenas candidatos fortes)
+      console.log(`   🔍 Etapa 3: Verificações detalhadas...`);
+
+      // 3.1: Verificar se realmente é biblioteca (REST)
+      if (await this.isLibraryRepository(repo)) {
+        console.log(`   📚 Biblioteca/ferramenta detectada após análise detalhada, pulando...`);
+        return null;
+      }
+
+      // 3.2: VERIFICAÇÃO DETALHADA DE WEBAPP (PRIORIDADE MÁXIMA)
+      // Se teve resultado ambíguo na etapa 1, fazer verificação completa
+      if (webAppCheck.isWebApp === null) {
+        const isReallyWebApp = await this.isRealWebApplication(repo);
+        if (!isReallyWebApp) {
+          console.log(`   ❌ Não confirmado como webapp após verificação detalhada, pulando...`);
+          return null;
+        }
+      }
+
+      console.log(`   ✅ Passou em todas as verificações - iniciando busca detalhada...`);
+
       // Buscar informações do último commit para registro
       let lastCommitDate = pushedAt;
       let lastCommitSha = null;
@@ -1035,18 +1595,7 @@ class GitHubAccessibilityMiner {
         // Usar pushedAt se não conseguir buscar commits
       }
 
-      // Filtrar bibliotecas usando nome, descrição e topics
-      if (await this.isLibraryRepository(repo)) {
-        console.log(`   📚 Biblioteca/ferramenta detectada, pulando...`);
-        return null;
-      }
-
-      // Verificar se é realmente uma aplicação web usando o "about"
-      if (!this.isWebApplication(repo)) {
-        console.log(`   ❌ Não é uma aplicação web, pulando...`);
-        return null;
-      }
-
+      // ETAPA 4: BUSCA DETALHADA DE FERRAMENTAS (apenas candidatos confirmados)
       const foundTools = {
         AXE: false,
         Pa11y: false,
@@ -1057,23 +1606,25 @@ class GitHubAccessibilityMiner {
         HTML_CodeSniffer: false,
       };
 
-      // Verificar descrição/about do repositório
+      console.log(`   🔍 Etapa 4: Busca detalhada de ferramentas...`);
+
+      // 4.1: Verificar descrição/about do repositório (dados GraphQL)
       await this.checkRepositoryAbout(repo, foundTools);
 
-      // Verificar arquivos de configuração
+      // 4.2: Verificar arquivos de configuração (REST)
       await this.checkConfigFiles(owner, name, foundTools);
 
-      // Verificar arquivos de dependências de todas as linguagens
+      // 4.3: Verificar arquivos de dependências (REST)
       await this.checkDependencyFiles(owner, name, foundTools);
 
-      // Verificar workflows do GitHub
+      // 4.4: Verificar workflows (REST)
       await this.checkWorkflows(owner, name, foundTools);
 
       const hasAnyTool = Object.values(foundTools).some((tool) => tool);
 
       if (hasAnyTool) {
         const toolsFound = Object.keys(foundTools).filter((key) => foundTools[key]);
-        console.log(`   ✅ Ferramentas: ${toolsFound.join(", ")}`);
+        console.log(`   ✅ SUCESSO: Ferramentas encontradas: ${toolsFound.join(", ")}`);
 
         return {
           repository: fullName,
@@ -1083,7 +1634,7 @@ class GitHubAccessibilityMiner {
         };
       }
 
-      console.log(`   ❌ Nenhuma ferramenta encontrada`);
+      console.log(`   ❌ Nenhuma ferramenta encontrada na busca detalhada`);
       return null;
     } catch (error) {
       console.log(`   ⚠️ Erro: ${error.message}`);
