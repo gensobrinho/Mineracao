@@ -512,6 +512,55 @@ class GitHubMiner {
         }
     }
 
+    // Busca repositórios usando REST API como fallback
+    async searchRepositoriesREST(query, page = 1) {
+        const searchQuery = encodeURIComponent(`${query} pushed:>2024-09-01 is:public`);
+        const url = `${BASE_URL}/search/repositories?q=${searchQuery}&sort=stars&order=desc&per_page=50&page=${page}`;
+        
+        try {
+            console.log(`   🔄 Usando API REST como fallback...`);
+            const result = await this.makeRequest(url);
+            
+            if (!result || !result.items) {
+                throw new Error('Resposta inválida da API REST');
+            }
+            
+            // Converte formato REST para formato compatível com GraphQL
+            const convertedItems = result.items.map(repo => ({
+                nameWithOwner: repo.full_name,
+                stargazerCount: repo.stargazers_count,
+                pushedAt: repo.pushed_at,
+                description: repo.description,
+                homepageUrl: repo.homepage,
+                primaryLanguage: repo.language ? { name: repo.language } : null,
+                repositoryTopics: { nodes: [] }, // Não disponível na API REST básica
+                defaultBranchRef: {
+                    name: repo.default_branch,
+                    target: {
+                        committedDate: repo.pushed_at
+                    }
+                },
+                owner: {
+                    login: repo.owner.login
+                },
+                isArchived: repo.archived,
+                isFork: repo.fork
+            }));
+            
+            return {
+                items: convertedItems,
+                pageInfo: {
+                    hasNextPage: result.items.length === 50, // Se retornou 50, pode ter mais
+                    endCursor: null
+                },
+                totalCount: result.total_count
+            };
+        } catch (error) {
+            console.error('Erro na API REST:', error);
+            throw error;
+        }
+    }
+
     // Busca repositórios usando GraphQL com query específica
     async searchRepositories(query = null, cursor = null) {
         // Query padrão se não fornecida
@@ -576,26 +625,47 @@ class GitHubMiner {
                 cursor 
             });
             
+            // Adiciona verificações de segurança
+            if (!result) {
+                throw new Error('Resposta vazia da API GraphQL');
+            }
+            
             if (result.errors) {
                 console.error('Erros na consulta GraphQL:', result.errors);
-                throw new Error('Erro na consulta GraphQL');
+                throw new Error(`Erro na consulta GraphQL: ${result.errors.map(e => e.message).join(', ')}`);
             }
+            
+            // Verifica se a estrutura de resposta está correta
+            if (!result.data || !result.data.search) {
+                console.error('Estrutura de resposta inválida:', JSON.stringify(result, null, 2));
+                throw new Error('Estrutura de resposta GraphQL inválida');
+            }
+            
+            const search = result.data.search;
             
             // Log do rate limit GraphQL
-            if (result.rateLimit) {
-                console.log(`   📊 Rate limit GraphQL: ${result.rateLimit.remaining} restantes`);
-                this.tokenLimits[this.tokenIndex] = result.rateLimit.remaining;
+            if (result.data.rateLimit) {
+                console.log(`   📊 Rate limit GraphQL: ${result.data.rateLimit.remaining} restantes`);
+                this.tokenLimits[this.tokenIndex] = result.data.rateLimit.remaining;
             }
             
-            console.log(`📊 Total de repositórios encontrados na busca: ${result.search.repositoryCount}`);
+            console.log(`📊 Total de repositórios encontrados na busca: ${search.repositoryCount || 0}`);
             
             return {
-                items: result.search.nodes || [],
-                pageInfo: result.search.pageInfo,
-                totalCount: result.search.repositoryCount
+                items: search.nodes || [],
+                pageInfo: search.pageInfo || { hasNextPage: false, endCursor: null },
+                totalCount: search.repositoryCount || 0
             };
         } catch (error) {
             console.error('Erro na consulta GraphQL:', error);
+            
+            // Se for erro de rate limit, tenta trocar token
+            if (error.message && error.message.includes('rate limit')) {
+                this.nextToken();
+                await this.sleep(5000);
+                throw new Error('Rate limit atingido, tentando com próximo token...');
+            }
+            
             throw error;
         }
     }
@@ -1146,86 +1216,132 @@ class GitHubMiner {
         ];
 
         try {
-            for (const query of queryStrategies) {
-                console.log(`\n🔍 Executando consulta: "${query}"`);
+            for (let queryIndex = 0; queryIndex < queryStrategies.length; queryIndex++) {
+                const query = queryStrategies[queryIndex];
+                console.log(`\n🔍 Executando consulta ${queryIndex + 1}/${queryStrategies.length}: "${query}"`);
                 
                 let hasNextPage = true;
                 let cursor = null;
+                let pageCount = 0;
+                const maxPagesPerQuery = 10; // Limita páginas por consulta
 
-                while (hasNextPage) {
+                while (hasNextPage && pageCount < maxPagesPerQuery) {
                     console.log(`\n📊 Buscando repositórios... (cursor: ${cursor || 'inicial'})`);
 
-                    const searchResult = await this.searchRepositories(query, cursor);
-                    const repositories = searchResult.items || [];
+                    try {
+                        let searchResult;
+                        
+                        // Tenta GraphQL primeiro
+                        try {
+                            searchResult = await this.searchRepositories(query, cursor);
+                        } catch (graphqlError) {
+                            console.log(`   ⚠️ GraphQL falhou, tentando REST API: ${graphqlError.message}`);
+                            // Se GraphQL falha, usa REST como fallback
+                            searchResult = await this.searchRepositoriesREST(query, pageCount + 1);
+                            // Para REST, não usamos cursor, então precisa resetar para próxima consulta
+                            cursor = null;
+                        }
+                        
+                        if (!searchResult || !searchResult.items) {
+                            console.log(`   ⚠️ Resultado vazio para a consulta, passando para próxima...`);
+                            break;
+                        }
+                        
+                        const repositories = searchResult.items;
+                        console.log(`🔍 Encontrados ${repositories.length} repositórios para análise`);
 
-                    console.log(`🔍 Encontrados ${repositories.length} repositórios para análise`);
-
-                    for (const repo of repositories) {
-                        // Pula se já foi processado
-                        if (this.processedRepos.has(repo.nameWithOwner)) {
-                            console.log(`   ⏭️ Já processado: ${repo.nameWithOwner}`);
-                            continue;
+                        if (repositories.length === 0) {
+                            console.log(`   ℹ️ Nenhum repositório encontrado, passando para próxima consulta...`);
+                            break;
                         }
 
-                        this.analyzedCount++;
-                        this.processedRepos.add(repo.nameWithOwner);
+                        for (const repo of repositories) {
+                            // Pula se já foi processado
+                            if (this.processedRepos.has(repo.nameWithOwner)) {
+                                console.log(`   ⏭️ Já processado: ${repo.nameWithOwner}`);
+                                continue;
+                            }
 
-                        console.log(`\n🔄 Analisando: ${repo.nameWithOwner} (${repo.stargazerCount} ⭐)`);
+                            this.analyzedCount++;
+                            this.processedRepos.add(repo.nameWithOwner);
 
-                        // Verifica se tem commits após setembro de 2024
-                        const lastCommit = new Date(repo.defaultBranchRef?.target?.committedDate || repo.pushedAt);
-                        if (lastCommit < new Date('2024-09-01')) {
-                            console.log(`   ⏭️ Pulando: commits muito antigos (${lastCommit.toISOString().split('T')[0]})`);
-                            continue;
+                            console.log(`\n🔄 Analisando: ${repo.nameWithOwner} (${repo.stargazerCount} ⭐)`);
+
+                            // Verifica se tem commits após setembro de 2024
+                            const lastCommit = new Date(repo.defaultBranchRef?.target?.committedDate || repo.pushedAt);
+                            if (lastCommit < new Date('2024-09-01')) {
+                                console.log(`   ⏭️ Pulando: commits muito antigos (${lastCommit.toISOString().split('T')[0]})`);
+                                continue;
+                            }
+
+                            // Verifica se é biblioteca/framework
+                            const isLib = await this.isLibrary(repo);
+                            if (isLib) {
+                                console.log(`   ⏭️ Pulando: é uma biblioteca/framework`);
+                                continue;
+                            }
+
+                            // Verifica se é aplicação web
+                            const isWebApp = await this.isWebApplication(repo);
+                            if (!isWebApp) {
+                                console.log(`   ⏭️ Pulando: não é uma aplicação web`);
+                                continue;
+                            }
+
+                            console.log(`   ✨ É uma aplicação web! Verificando ferramentas de acessibilidade...`);
+
+                            // Verifica ferramentas de acessibilidade
+                            const toolsFound = await this.checkAccessibilityTools(repo);
+                            const hasAccessibilityTools = Object.values(toolsFound).some(found => found);
+
+                            if (hasAccessibilityTools) {
+                                this.saveToCSV(repo, toolsFound);
+                                const foundTools = Object.keys(toolsFound).filter(tool => toolsFound[tool]);
+                                console.log(`   🎯 Ferramentas encontradas: ${foundTools.join(', ')}`);
+                            } else {
+                                console.log(`   ❌ Nenhuma ferramenta de acessibilidade encontrada`);
+                            }
+
+                            // Pequena pausa para evitar rate limiting
+                            await this.sleep(100);
                         }
 
-                        // Verifica se é biblioteca/framework
-                        const isLib = await this.isLibrary(repo);
-                        if (isLib) {
-                            console.log(`   ⏭️ Pulando: é uma biblioteca/framework`);
-                            continue;
+                        // Atualiza cursor e estado
+                        hasNextPage = searchResult.pageInfo?.hasNextPage || false;
+                        cursor = searchResult.pageInfo?.endCursor;
+                        pageCount++;
+
+                        // Salva estado a cada página
+                        this.saveState();
+
+                        console.log(`\n📈 Progresso: ${this.analyzedCount} analisados, ${this.savedCount} salvos`);
+
+                        // Pausa entre páginas
+                        await this.sleep(1000);
+
+                        // Para evitar consultas infinitas, limita a 50 repositórios por query
+                        if (repositories.length < 10) {
+                            console.log(`   ℹ️ Poucos resultados encontrados, passando para próxima consulta...`);
+                            break;
                         }
-
-                        // Verifica se é aplicação web
-                        const isWebApp = await this.isWebApplication(repo);
-                        if (!isWebApp) {
-                            console.log(`   ⏭️ Pulando: não é uma aplicação web`);
-                            continue;
+                        
+                    } catch (queryError) {
+                        console.error(`   ❌ Erro na consulta "${query}":`, queryError.message);
+                        
+                        // Se for erro de autenticação, para tudo
+                        if (queryError.message.includes('Bad credentials') || queryError.message.includes('401')) {
+                            console.error('❌ Token inválido! Verifique sua configuração.');
+                            throw queryError;
                         }
-
-                        console.log(`   ✨ É uma aplicação web! Verificando ferramentas de acessibilidade...`);
-
-                        // Verifica ferramentas de acessibilidade
-                        const toolsFound = await this.checkAccessibilityTools(repo);
-                        const hasAccessibilityTools = Object.values(toolsFound).some(found => found);
-
-                        if (hasAccessibilityTools) {
-                            this.saveToCSV(repo, toolsFound);
-                            const foundTools = Object.keys(toolsFound).filter(tool => toolsFound[tool]);
-                            console.log(`   🎯 Ferramentas encontradas: ${foundTools.join(', ')}`);
-                        } else {
-                            console.log(`   ❌ Nenhuma ferramenta de acessibilidade encontrada`);
+                        
+                        // Se for rate limit, espera um pouco e tenta próxima consulta
+                        if (queryError.message.includes('rate limit')) {
+                            console.log('   ⏳ Rate limit atingido, esperando antes da próxima consulta...');
+                            await this.sleep(10000);
                         }
-
-                        // Pequena pausa para evitar rate limiting
-                        await this.sleep(100);
-                    }
-
-                    // Atualiza cursor e estado
-                    hasNextPage = searchResult.pageInfo?.hasNextPage || false;
-                    cursor = searchResult.pageInfo?.endCursor;
-
-                    // Salva estado a cada página
-                    this.saveState();
-
-                    console.log(`\n📈 Progresso: ${this.analyzedCount} analisados, ${this.savedCount} salvos`);
-
-                    // Pausa entre páginas
-                    await this.sleep(1000);
-
-                    // Para evitar consultas infinitas, limita a 50 repositórios por query
-                    if (repositories.length < 10) {
-                        console.log(`   ℹ️ Poucos resultados encontrados, passando para próxima consulta...`);
+                        
+                        // Para erro específico desta consulta, passa para próxima
+                        console.log(`   🔄 Tentando próxima consulta...`);
                         break;
                     }
                 }
