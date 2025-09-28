@@ -723,8 +723,7 @@ class GitHubMiner {
             
             const libIndicators = [
                 'is a library', 'is a framework', 'component library', 'ui library',
-                'framework for', 'toolkit for', 'library for', 'framework that',
-                'for building', 'for developers', 'npm package', 'node module',
+                'toolkit for', 'framework that','for developers', 'npm package',
                 'react library', 'vue library', 'angular library', 'plugin for'
             ];
             
