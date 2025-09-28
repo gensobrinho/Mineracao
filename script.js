@@ -454,6 +454,8 @@ class GitHubAccessibilityMiner {
   async isWebApplication(repo) {
     const description = (repo.description || "").toLowerCase();
     const name = (repo.name || "").toLowerCase();
+    const owner = (repo.owner && repo.owner.login) || "";
+    const repoName = repo.name || "";
 
     // Adaptar para GraphQL - topics vêm em formato diferente
     let topics = [];
@@ -472,7 +474,38 @@ class GitHubAccessibilityMiner {
 
     console.log(`   🔍 Verificando se é aplicação web: ${repo.nameWithOwner || repo.full_name}`);
 
-    // INDICADORES POSITIVOS DE APLICAÇÃO WEB (mais inclusivos)
+    // EXCLUSÕES ESPECÍFICAS PRIMEIRO (casos muito óbvios de não-webapp)
+    const obviousNonAppKeywords = [
+      // Frameworks e runtimes
+      "framework", "runtime", "sdk", "api", "core", "engine",
+      // Bibliotecas MUITO óbvias
+      "npm package", "node module", "javascript library", "react library", 
+      "vue library", "ui library", "component library", "cli tool", 
+      "command line tool", "plugin for", "extension for",
+      // Documentação/tutoriais óbvios
+      "awesome list", "curated list", "tutorial project", "example project",
+      "learning repository", "educational repository",
+      // Ferramentas de desenvolvimento óbvias
+      "build tool", "bundler", "compiler", "linter", "formatter"
+    ];
+
+    const hasObviousNonAppKeywords = obviousNonAppKeywords.some((keyword) => allContent.includes(keyword));
+
+    if (hasObviousNonAppKeywords) {
+      console.log(`   ❌ Não é webapp (biblioteca/ferramenta óbvia detectada)`);
+      return false;
+    }
+
+    // VERIFICAÇÃO DE ARQUIVOS REAIS (mais confiável)
+    console.log(`   🔍 Verificando arquivos de aplicação web...`);
+    const hasWebFiles = await this.checkForWebApplicationFiles(owner, repoName);
+    
+    if (hasWebFiles) {
+      console.log(`   ✅ Confirmado como webapp (arquivos web encontrados)`);
+      return true;
+    }
+
+    // INDICADORES POSITIVOS DE APLICAÇÃO WEB (fallback)
     const webAppKeywords = [
       // Tipos gerais de aplicação
       "web application", "web app", "webapp", "website", "web platform", "web portal", 
@@ -489,11 +522,6 @@ class GitHubAccessibilityMiner {
       "portfolio site", "personal website", "company website", "news site", 
       "media platform", "publishing platform",
 
-      // Indicadores técnicos
-      "frontend", "backend", "fullstack", "full-stack", "single page application", 
-      "spa", "progressive web app", "pwa", "responsive", "mobile-first", 
-      "cross-platform web", "react app", "vue app", "angular app", "node app",
-
       // Contextos de uso
       "deployed", "hosted", "live demo", "production", "users", "customers", 
       "clients", "visitors", "open source web application", "used on websites",
@@ -508,60 +536,165 @@ class GitHubAccessibilityMiner {
     const webAppTopics = [
       "webapp", "web-app", "website", "web-application", "dashboard", "admin-panel",
       "cms", "ecommerce", "e-commerce", "saas", "platform", "portal", "frontend", 
-      "fullstack", "spa", "pwa", "responsive", "bootstrap", "tailwind", "react",
-      "vue", "angular", "nodejs", "express", "nextjs", "gatsby", "nuxt"
-    ];
-
-    // EXCLUSÕES ESPECÍFICAS (apenas casos muito óbvios)
-    const obviousNonAppKeywords = [
-      // Apenas bibliotecas MUITO óbvias
-      "npm package", "node module", "javascript library", "react library", 
-      "vue library", "ui library", "component library", "cli tool", 
-      "command line tool", "plugin for", "extension for",
-      
-      // Documentação/tutoriais óbvios
-      "awesome list", "curated list", "tutorial project", "example project",
-      "learning repository", "educational repository",
-      
-      // Ferramentas de desenvolvimento óbvias
-      "build tool", "bundler", "compiler", "linter", "formatter"
+      "fullstack", "spa", "pwa", "responsive", "bootstrap", "tailwind"
     ];
 
     // Verificações
     const hasWebAppKeywords = webAppKeywords.some((keyword) => allContent.includes(keyword));
     const hasWebAppTopics = topics.some((topic) => webAppTopics.includes(topic));
     const hasHomepage = !!(homepage && homepage.includes("http"));
-    const hasObviousNonAppKeywords = obviousNonAppKeywords.some((keyword) => allContent.includes(keyword));
 
-    // LÓGICA INCLUSIVA: assume que é webapp a menos que seja obviamente uma biblioteca/ferramenta
-    let isWebApp = false;
-    let reason = "";
-
-    if (hasObviousNonAppKeywords) {
-      isWebApp = false;
-      reason = "biblioteca/ferramenta óbvia";
-    } else if (hasWebAppKeywords || hasWebAppTopics || hasHomepage) {
-      isWebApp = true;
+    if (hasWebAppKeywords || hasWebAppTopics || hasHomepage) {
       const indicators = [];
       if (hasWebAppKeywords) indicators.push("keywords");
       if (hasWebAppTopics) indicators.push("topics");
       if (hasHomepage) indicators.push("homepage");
-      reason = indicators.join(" + ");
-    } else {
-      // Se não tem indicadores claros, vamos assumir que pode ser webapp
-      // e deixar a detecção de ferramentas decidir
-      isWebApp = true;
-      reason = "assumindo webapp por padrão";
+      console.log(`   ✅ Identificado como webapp (${indicators.join(" + ")})`);
+      return true;
     }
 
-    // Log detalhado
-    if (isWebApp) {
-      console.log(`   ✅ Identificado como webapp (${reason})`);
-    } else {
-      console.log(`   ❌ Não é webapp (${reason})`);
-    }
+    console.log(`   ❌ Não identificado como webapp`);
+    return false;
+  }
 
-    return isWebApp;
+  async checkForWebApplicationFiles(owner, repo) {
+    try {
+      // Arquivos que DEFINITIVAMENTE indicam uma aplicação web
+      const webApplicationFiles = [
+        // HTML files
+        "index.html", "main.html", "app.html", "home.html",
+        
+        // React/JSX files
+        "App.jsx", "app.jsx", "index.jsx", "main.jsx",
+        "App.tsx", "app.tsx", "index.tsx", "main.tsx",
+        
+        // Vue files
+        "App.vue", "main.vue", "index.vue",
+        
+        // Angular files
+        "app.component.ts", "main.ts", "app.module.ts",
+        
+        // CSS/Styling files (indicam frontend)
+        "styles.css", "main.css", "app.css", "index.css",
+        "style.scss", "main.scss", "app.scss",
+        
+        // Next.js specific
+        "_app.js", "_document.js", "next.config.js",
+        "_app.tsx", "_document.tsx",
+        
+        // Static files (indicam servir conteúdo web)
+        "favicon.ico", "robots.txt", "sitemap.xml"
+      ];
+
+      // Verificar diretórios típicos de aplicação web
+      const webApplicationDirs = [
+        "public", "static", "assets", "dist", "build",
+        "src", "app", "pages", "components", "views", "templates"
+      ];
+
+      console.log(`     🔍 Verificando arquivos na raiz...`);
+      
+      // 1. Verificar arquivos na raiz
+      const rootContents = await this.getRepositoryContents(owner, repo);
+      const rootFileNames = rootContents.map(f => f.name.toLowerCase());
+      const rootDirNames = rootContents.filter(f => f.type === 'dir').map(f => f.name.toLowerCase());
+
+      // Verificar se tem arquivos web na raiz
+      const hasWebFilesInRoot = webApplicationFiles.some(file => 
+        rootFileNames.includes(file.toLowerCase())
+      );
+
+      if (hasWebFilesInRoot) {
+        const foundFiles = webApplicationFiles.filter(file => 
+          rootFileNames.includes(file.toLowerCase())
+        );
+        console.log(`     ✅ Arquivos web encontrados na raiz: ${foundFiles.join(", ")}`);
+        return true;
+      }
+
+      // Verificar se tem diretórios típicos de webapp
+      const hasWebDirs = webApplicationDirs.some(dir => 
+        rootDirNames.includes(dir)
+      );
+
+      if (hasWebDirs) {
+        const foundDirs = webApplicationDirs.filter(dir => 
+          rootDirNames.includes(dir)
+        );
+        console.log(`     🔍 Diretórios web encontrados: ${foundDirs.join(", ")}, verificando conteúdo...`);
+
+        // 2. Verificar conteúdo dos diretórios web
+        for (const dirName of foundDirs) {
+          try {
+            const dirContents = await this.getRepositoryContents(owner, repo, dirName);
+            const dirFileNames = dirContents.map(f => f.name.toLowerCase());
+
+            // Procurar por arquivos web específicos nesses diretórios
+            const webFilesInDir = [
+              // HTML
+              ...dirFileNames.filter(f => f.endsWith('.html')),
+              // React/JSX/TSX
+              ...dirFileNames.filter(f => f.endsWith('.jsx') || f.endsWith('.tsx')),
+              // Vue
+              ...dirFileNames.filter(f => f.endsWith('.vue')),
+              // CSS/SCSS
+              ...dirFileNames.filter(f => f.endsWith('.css') || f.endsWith('.scss') || f.endsWith('.sass')),
+              // JavaScript modules (não todos, apenas alguns específicos)
+              ...dirFileNames.filter(f => ['app.js', 'main.js', 'index.js'].includes(f))
+            ];
+
+            if (webFilesInDir.length > 0) {
+              console.log(`     ✅ Arquivos web encontrados em ${dirName}/: ${webFilesInDir.slice(0, 5).join(", ")}${webFilesInDir.length > 5 ? '...' : ''}`);
+              return true;
+            }
+          } catch (e) {
+            // Continuar verificando outros diretórios
+          }
+        }
+      }
+
+      // 3. Verificar package.json para dependências web (last resort)
+      try {
+        const packageJsonContent = await this.getFileContent(owner, repo, "package.json");
+        if (packageJsonContent) {
+          const pkg = JSON.parse(packageJsonContent);
+          
+          // Dependências que indicam aplicação web frontend
+          const webDependencies = [
+            "react", "vue", "angular", "@angular/core", "svelte", 
+            "next", "nuxt", "gatsby", "create-react-app",
+            "express", "koa", "fastify", "hapi",
+            "webpack", "vite", "parcel", "rollup"
+          ];
+
+          const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
+          const hasWebDeps = webDependencies.some(dep => 
+            Object.keys(dependencies).some(key => key.includes(dep))
+          );
+
+          // Scripts que indicam aplicação web
+          const webScripts = ["start", "serve", "dev", "build", "deploy"];
+          const hasWebScripts = webScripts.some(script => 
+            pkg.scripts && pkg.scripts[script]
+          );
+
+          if (hasWebDeps && hasWebScripts) {
+            console.log(`     ✅ Dependências e scripts web encontrados em package.json`);
+            return true;
+          }
+        }
+      } catch (e) {
+        // Não tem package.json ou erro ao ler
+      }
+
+      console.log(`     ❌ Nenhum arquivo de aplicação web encontrado`);
+      return false;
+
+    } catch (error) {
+      console.log(`     ⚠️ Erro ao verificar arquivos: ${error.message}`);
+      // Em caso de erro, ser conservador e retornar false
+      return false;
+    }
   }
 
   async checkRepositoryAbout(repo, foundTools) {
