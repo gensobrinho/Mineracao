@@ -689,230 +689,361 @@ class GitHubMiner {
 
         const homepage = (repo.homepageUrl || repo.homepage || '').toLowerCase();
 
-        // Tenta buscar o README
-        let readmeContent = '';
-        try {
-            const repoName = repo.name || repo.nameWithOwner.split('/')[1];
-            const readme = await this.getReadmeContent(owner, repoName);
-            if (readme) {
-                readmeContent = readme.toLowerCase();
-            } else {
-                console.log(`   ⚠️ README não encontrado, pulando repositório por segurança`);
-                return true;
-            }
-        } catch (e) {
-            console.log(`   ⚠️ Erro ao buscar README, pulando repositório por segurança`);
-            return true;
-        }
-
-        // Verificações diretas no README
-        if (readmeContent.includes('library') || 
-            readmeContent.includes('biblioteca') ||
-            readmeContent.includes('lib') ||
-            readmeContent.includes('gui') ||
-            readmeContent.includes('graphical user interface') ||
-            name === 'turbo') {
-            console.log(`   📚 Biblioteca/GUI detectada no README (menção direta)`);
-            return true;
-        }
-
-        // Filtro genérico para bibliotecas/frameworks
-        if (readmeContent) {
-            const firstLinesArr = readmeContent.split('\n').slice(0, 15);
-            const firstLines = firstLinesArr.join(' ');
-            
-            const libIndicators = [
-                'is a library', 'is a framework', 'component library', 'ui library',
-                'toolkit for', 'framework that','for developers', 'npm package',
-                'react library', 'vue library', 'angular library', 'plugin for'
-            ];
-            
-            const appIndicators = [
-                'this is a web application', 'live demo', 'try it online',
-                'production site', 'hosted at', 'visit the app'
-            ];
-            
-            const isLib = libIndicators.some(phrase => firstLines.includes(phrase));
-            const isApp = appIndicators.some(phrase => firstLines.includes(phrase));
-            
-            if (isLib && !isApp) {
-                console.log(`   📚 Biblioteca/framework detectada por frases genéricas no README`);
-                return true;
-            }
-        }
-
-        // Combina informações para análise final
-        const combinedText = [description, name, fullName, topicsArr.join(' '), homepage, readmeContent].join(' ');
-
-        // Palavras-chave definitivas de bibliotecas
-        const strongLibraryKeywords = [
-            'library', 'framework', 'plugin', 'component', 'util', 'utils',
-            'helper', 'helpers', 'boilerplate', 'template', 'starter', 'kit',
-            'cli', 'tool', 'tools', 'awesome', 'collection', 'list',
-            'examples', 'example', 'tutorial', 'tutorials', 'demo', 'demos',
-            'sample', 'samples', 'docs', 'documentation', 'guide', 'guides',
-            'npm package', 'pip package', 'gem', 'composer package',
-            'ui kit', 'design system', 'components library'
+        // 1. INDICADORES FORTE DE BIBLIOTECAS (alta confiança)
+        const strongLibraryIndicators = [
+            // Padrões de nomes óbvios
+            /^awesome-/, /^.*-awesome$/, 
+            /^.*-template$/, /^template-/, /^.*-boilerplate$/, /^boilerplate-/,
+            /^.*-starter$/, /^starter-/, /^.*-cli$/, /^cli-/,
+            /^.*-sdk$/, /^sdk-/, /^.*-api$/, /^api-/,
+            /^.*-plugin$/, /^plugin-/, /^.*-extension$/, /^extension-/,
+            /^.*-component$/, /^component-/, /^.*-widget$/, /^widget-/,
+            /^.*-util$/, /^.*-utils$/, /^util-/, /^utils-/,
+            /^.*-helper$/, /^.*-helpers$/, /^helper-/, /^helpers-/,
+            /^.*-lib$/, /^lib-/, /^.*-library$/, /^library-/
         ];
 
-        // Apps não-web específicos
+        const hasStrongLibraryName = strongLibraryIndicators.some(pattern => 
+            pattern.test(name) || pattern.test(fullName)
+        );
+
+        if (hasStrongLibraryName) {
+            console.log(`   📚 É biblioteca: padrão de nome definitivo (${name})`);
+            return true;
+        }
+
+        // 2. INDICADORES FORTES DE APLICAÇÕES WEB (alta confiança - não são bibliotecas)
+        const strongAppIndicators = [
+            // Palavras no nome/descrição que indicam apps
+            'blog', 'website', 'site', 'portal', 'portfolio', 'dashboard', 'admin', 'panel',
+            'shop', 'store', 'ecommerce', 'e-commerce', 'marketplace', 'cart',
+            'chat', 'forum', 'social', 'platform', 'system', 'manager', 'management',
+            'tracker', 'monitor', 'monitoring', 'analyzer', 'analytics', 'calculator', 'converter',
+            'gallery', 'viewer', 'editor', 'player', 'game', 'quiz', 'survey',
+            'todo', 'task', 'tasks', 'planner', 'calendar', 'scheduler', 'booking',
+            'webapp', 'web-app', 'web app', 'application', 'app for', 
+            'crm', 'cms', 'erp', 'saas', 'booking system', 'reservation',
+            'online tool', 'web tool', 'generator', 'builder', 'creator',
+            'music player', 'video player', 'photo gallery', 'image viewer',
+            'note taking', 'notes app', 'productivity', 'workspace'
+        ];
+
+        const combinedForApp = [description, name, fullName, topicsArr.join(' ')].join(' ');
+        const hasStrongAppIndicators = strongAppIndicators.some(indicator => 
+            combinedForApp.includes(indicator)
+        );
+
+        if (hasStrongAppIndicators) {
+            console.log(`   🌐 É aplicação: indicadores fortes de app web`);
+            return false; // NÃO é biblioteca
+        }
+
+        // 3. TENTA BUSCAR README APENAS SE NECESSÁRIO (casos duvidosos)
+        let readmeContent = '';
+        const needsReadmeCheck = !hasStrongAppIndicators && !hasStrongLibraryName;
+        
+        if (needsReadmeCheck) {
+            try {
+                const repoName = repo.name || repo.nameWithOwner.split('/')[1];
+                const readme = await this.getReadmeContent(owner, repoName);
+                if (readme) {
+                    readmeContent = readme.toLowerCase();
+                } else {
+                    // Se não tem README, assume que pode ser uma aplicação (menos restritivo)
+                    console.log(`   ℹ️ README não encontrado, assumindo como possível aplicação`);
+                    return false;
+                }
+            } catch (e) {
+                console.log(`   ℹ️ Erro ao buscar README, assumindo como possível aplicação`);
+                return false;
+            }
+        }
+
+        // 4. ANÁLISE DO README (apenas para casos duvidosos)
+        if (readmeContent) {
+            // Indicadores MUITO específicos de bibliotecas no README (mais conservadores)
+            const readmeLibraryIndicators = [
+                'is a library', 'is a framework', 'is a component library',
+                'is a utility library', 'is a javascript library',
+                'this library', 'this framework', 'this package provides',
+                'import this library', 'require this package', 'use this library',
+                'library that provides', 'framework that provides',
+                'add this library to your project', 'include this library in your project',
+                'designed to be used as a library', 'designed as a reusable component',
+                'api reference', 'library documentation', 'package documentation'
+            ];
+
+            // Indicadores de aplicações web no README (mais abrangentes)
+            const readmeAppIndicators = [
+                'live demo', 'visit the site', 'check it out', 'try it online',
+                'deployed at', 'hosted on', 'available at', 'access the app',
+                'demo:', 'demo at', 'website:', 'live at:', 'view online',
+                'visit our app', 'try the app', 'see it in action',
+                'production deployment', 'production site', 'running at',
+                'features include', 'this app allows', 'this website',
+                'user can', 'users can', 'login to', 'sign up',
+                'dashboard for', 'platform for', 'tool for managing'
+            ];
+
+            const firstLines = readmeContent.split('\n').slice(0, 10).join(' ');
+            
+            const hasReadmeLibIndicators = readmeLibraryIndicators.some(indicator => 
+                firstLines.includes(indicator)
+            );
+            
+            const hasReadmeAppIndicators = readmeAppIndicators.some(indicator => 
+                firstLines.includes(indicator)
+            );
+
+            if (hasReadmeAppIndicators && !hasReadmeLibIndicators) {
+                console.log(`   🌐 É aplicação: indicadores de app no README`);
+                return false;
+            }
+
+            if (hasReadmeLibIndicators && !hasReadmeAppIndicators) {
+                console.log(`   📚 É biblioteca: indicadores de lib no README`);
+                return true;
+            }
+        }
+
+        // 5. ANÁLISE DE TÓPICOS/TAGS
+        const libraryTopics = [
+            'library', 'framework', 'component', 'plugin', 'sdk', 'api',
+            'npm-package', 'package', 'module', 'tool', 'cli'
+        ];
+
+        const hasLibraryTopics = topicsArr.some(topic => 
+            libraryTopics.some(libTopic => topic.includes(libTopic))
+        );
+
+        if (hasLibraryTopics) {
+            console.log(`   📚 É biblioteca: tópicos indicam biblioteca (${topicsArr.filter(t => libraryTopics.some(lt => t.includes(lt))).join(', ')})`);
+            return true;
+        }
+
+        // 6. VERIFICAÇÃO DE PALAVRAS-CHAVE NA DESCRIÇÃO (mais específica)
+        const descriptionLibraryKeywords = [
+            // Frases muito específicas que raramente aparecem em apps
+            'javascript library for', 'react library for', 'vue library for', 'angular library for',
+            'node.js library', 'node library', 'js library', 'typescript library',
+            'npm package for', 'component library for', 'ui component library',
+            'utility library for', 'helper library for', 'reusable library',
+            'library that provides', 'framework that provides', 'toolkit that provides',
+            'designed as a library', 'designed as a framework', 'designed as a component',
+            'collection of utilities', 'set of utilities', 'utility functions for'
+        ];
+
+        const hasDescLibKeywords = descriptionLibraryKeywords.some(keyword => 
+            description.includes(keyword)
+        );
+
+        if (hasDescLibKeywords) {
+            console.log(`   📚 É biblioteca: palavras-chave muito específicas na descrição`);
+            return true;
+        }
+
+        // 7. INDICADORES DE APPS NÃO-WEB (mobile, desktop, etc)
         const nonWebKeywords = [
             'mobile app', 'android app', 'ios app', 'desktop app',
-            'electron app', 'native app', 'flutter app', 'react native',
-            'xamarin', 'unity', 'game', 'cli tool', 'command line',
-            'terminal', 'console', 'api only', 'backend only',
-            'microservice', 'rest api', 'graphql api', 'server only'
+            'electron app', 'react native', 'flutter app', 'native app',
+            'desktop application', 'mobile application'
         ];
 
-        // Padrões no nome
-        const libraryNamePatterns = [
-            /^awesome-/, /^.*-awesome$/, /^.*-template$/, /^template-/,
-            /^.*-boilerplate$/, /^boilerplate-/, /^.*-starter$/, /^starter-/,
-            /^.*-kit$/, /^.*-utils$/, /^.*-helpers$/, /^.*-components$/,
-            /^.*-ui$/, /^ui-/, /^.*-cli$/, /^.*-tool$/
-        ];
+        const hasNonWebKeywords = nonWebKeywords.some(keyword => 
+            combinedForApp.includes(keyword)
+        );
 
-        const hasLibraryKeywords = strongLibraryKeywords.some(keyword => combinedText.includes(keyword));
-        const hasNonWebKeywords = nonWebKeywords.some(keyword => combinedText.includes(keyword));
-        const hasLibraryNamePattern = libraryNamePatterns.some(pattern => pattern.test(name) || pattern.test(fullName));
-
-        const isLibrary = hasLibraryKeywords || hasNonWebKeywords || hasLibraryNamePattern;
-
-        if (isLibrary) {
-            const reasons = [];
-            if (hasLibraryKeywords) reasons.push('palavras-chave de biblioteca');
-            if (hasNonWebKeywords) reasons.push('palavras-chave não-web');
-            if (hasLibraryNamePattern) reasons.push('padrão de nome de biblioteca');
-            console.log(`   📚 É biblioteca/framework: ${reasons.join(', ')}`);
+        if (hasNonWebKeywords) {
+            console.log(`   📱 É app não-web: indicadores de mobile/desktop`);
+            return true; // Considera como "biblioteca" para filtrar
         }
 
-        return isLibrary;
+        // 8. POR PADRÃO: ASSUME QUE É APLICAÇÃO WEB (menos restritivo)
+        console.log(`   ✅ Assumido como aplicação web (não é biblioteca)`);
+        return false;
     }
 
     // Verifica se é uma aplicação web
     async isWebApplication(repo) {
         try {
-            // Primeiro verifica se tem indicadores óbvios de apps não-web
             const description = (repo.description || '').toLowerCase();
             const name = repo.nameWithOwner.toLowerCase();
             const language = repo.primaryLanguage?.name?.toLowerCase() || '';
             
-            // Rejeita explicitamente apps móveis/desktop
-            const nonWebKeywords = ['mobile', 'android', 'ios', 'desktop', 'electron', 'native', 'flutter', 'react-native', 'xamarin', 'unity', 'cli', 'command line', 'terminal', 'api only', 'backend only'];
-            const isNonWebApp = nonWebKeywords.some(keyword => 
-                description.includes(keyword) || name.includes(keyword)
+            console.log(`   🔍 Verificando se é web app: ${name} (linguagem: ${language || 'não detectada'})`);
+            
+            // 1. VERIFICAÇÕES RÁPIDAS DE ELIMINAÇÃO
+            // Rejeita explicitamente apps móveis/desktop/CLI
+            const nonWebKeywords = [
+                'mobile app', 'android app', 'ios app', 'desktop app',
+                'electron app', 'native app', 'flutter app', 'react-native',
+                'xamarin', 'unity', 'game engine', 'cli tool', 'command line',
+                'terminal app', 'console app', 'api only', 'backend only',
+                'server only', 'microservice only', 'rest api only'
+            ];
+            
+            const combinedText = [description, name].join(' ');
+            const hasNonWebKeywords = nonWebKeywords.some(keyword => 
+                combinedText.includes(keyword)
             );
             
-            if (isNonWebApp) {
-                console.log(`   🚫 Rejeitado por palavras-chave não-web`);
+            if (hasNonWebKeywords) {
+                console.log(`   🚫 Rejeitado: palavras-chave não-web detectadas`);
                 return false;
             }
 
-            // Linguagens que frequentemente indicam aplicações web
-            const webLanguages = ['javascript', 'typescript', 'html', 'css', 'php', 'python', 'ruby', 'vue', 'svelte'];
+            // 2. INDICADORES FORTES DE WEB APP
+            const strongWebAppKeywords = [
+                'website', 'web app', 'webapp', 'web application', 'web portal',
+                'dashboard', 'admin panel', 'cms', 'blog', 'portfolio',
+                'ecommerce', 'e-commerce', 'shop', 'store', 'marketplace',
+                'social network', 'social media', 'chat app', 'forum',
+                'online tool', 'web tool', 'calculator', 'converter',
+                'gallery', 'viewer', 'editor online', 'web editor',
+                'todo app', 'task manager', 'project manager',
+                'monitoring', 'analytics', 'tracker'
+            ];
+
+            const hasStrongWebAppKeywords = strongWebAppKeywords.some(keyword => 
+                combinedText.includes(keyword)
+            );
+
+            if (hasStrongWebAppKeywords) {
+                console.log(`   ✅ Confirmado: palavras-chave de web app detectadas`);
+                return true;
+            }
+
+            // 3. LINGUAGENS WEB
+            const webLanguages = [
+                'javascript', 'typescript', 'html', 'css', 'php', 'python', 
+                'ruby', 'vue', 'svelte', 'dart', 'kotlin', 'swift'
+            ];
             const isWebLanguage = webLanguages.includes(language);
 
-            // Verifica arquivos que indicam aplicação web
-            let webIndicatorFound = false;
-            for (const file of WEB_APP_INDICATORS.slice(0, 10)) { // Verifica apenas os primeiros 10 para economizar requests
+            if (!isWebLanguage && language) {
+                console.log(`   🚫 Rejeitado: linguagem não-web (${language})`);
+                return false;
+            }
+
+            // 4. VERIFICAÇÃO DE ARQUIVOS WEB (mais eficiente - apenas alguns)
+            const criticalWebFiles = [
+                'index.html', 'public/index.html', 'src/index.html',
+                'package.json', 'next.config.js', 'nuxt.config.js',
+                'vue.config.js', 'angular.json', 'webpack.config.js'
+            ];
+
+            let webFileFound = false;
+            let packageJsonFound = false;
+
+            for (const file of criticalWebFiles) {
                 try {
                     const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${file}`;
                     await this.makeRequest(url);
-                    console.log(`   📁 Encontrado arquivo web: ${file}`);
-                    webIndicatorFound = true;
-                    break; // Se encontrou um, já é suficiente
+                    console.log(`   📁 Arquivo web encontrado: ${file}`);
+                    
+                    if (file === 'package.json') {
+                        packageJsonFound = true;
+                    } else {
+                        webFileFound = true;
+                    }
+                    
+                    break; // Se encontrou um arquivo web, já é suficiente
                 } catch (error) {
-                    // Arquivo não encontrado, continua procurando
+                    // Arquivo não encontrado, continua
                     continue;
                 }
             }
 
-            if (webIndicatorFound) return true;
-
-            // Verifica package.json para dependências web
-            try {
-                const packageUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/package.json`;
-                const packageData = await this.makeRequest(packageUrl);
-                
-                if (packageData.content) {
-                    const content = Buffer.from(packageData.content, 'base64').toString('utf8');
-                    const packageJson = JSON.parse(content);
-                    
-                    // Verifica dependências típicas de web apps
-                    const webDependencies = [
-                        'react', 'vue', 'angular', 'svelte', 'next', 'nuxt', 'gatsby',
-                        'express', 'fastify', 'koa', 'hapi', 'nestjs',
-                        'webpack', 'vite', 'rollup', 'parcel',
-                        'react-dom', 'vue-router', 'react-router',
-                        'axios', 'fetch', 'cors', 'helmet',
-                        'tailwindcss', 'bootstrap', 'material-ui', 'chakra-ui'
-                    ];
-                    
-                    const dependencies = {
-                        ...(packageJson.dependencies || {}),
-                        ...(packageJson.devDependencies || {})
-                    };
-                    
-                    const hasWebDeps = webDependencies.some(dep => 
-                        Object.keys(dependencies).some(key => key.includes(dep))
-                    );
-                    
-                    if (hasWebDeps) {
-                        console.log(`   📦 Encontradas dependências web no package.json`);
-                        return true;
-                    }
-                    
-                    // Verifica scripts típicos de web apps
-                    const scripts = packageJson.scripts || {};
-                    const webScripts = ['build', 'start', 'dev', 'serve', 'preview'];
-                    const hasWebScripts = webScripts.some(script => scripts[script]);
-                    
-                    if (hasWebScripts) {
-                        console.log(`   🔧 Encontrados scripts web no package.json`);
-                        return true;
-                    }
-                }
-            } catch (error) {
-                // package.json não encontrado ou inválido
+            if (webFileFound) {
+                console.log(`   ✅ Confirmado: estrutura de web app detectada`);
+                return true;
             }
 
-            // Verifica se tem estrutura típica de web app no diretório raiz
+            // 5. ANÁLISE DO PACKAGE.JSON (se encontrado)
+            if (packageJsonFound) {
+                try {
+                    const packageUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/package.json`;
+                    const packageData = await this.makeRequest(packageUrl);
+                    
+                    if (packageData.content) {
+                        const content = Buffer.from(packageData.content, 'base64').toString('utf8');
+                        const packageJson = JSON.parse(content);
+                        
+                        // Dependências que indicam web apps
+                        const webDependencies = [
+                            'react', 'vue', 'angular', 'svelte', 'next', 'nuxt', 'gatsby',
+                            'express', 'fastify', 'koa', 'hapi', 'nestjs',
+                            'webpack', 'vite', 'rollup', 'parcel', 'create-react-app',
+                            'react-dom', 'vue-router', 'react-router', '@angular/core',
+                            'tailwindcss', 'bootstrap', 'material-ui', 'chakra-ui'
+                        ];
+                        
+                        const dependencies = {
+                            ...(packageJson.dependencies || {}),
+                            ...(packageJson.devDependencies || {})
+                        };
+                        
+                        const foundWebDeps = Object.keys(dependencies).filter(dep => 
+                            webDependencies.some(webDep => dep.includes(webDep))
+                        );
+                        
+                        if (foundWebDeps.length > 0) {
+                            console.log(`   ✅ Confirmado: dependências web encontradas (${foundWebDeps.slice(0, 3).join(', ')})`);
+                            return true;
+                        }
+                        
+                        // Scripts que indicam web apps
+                        const scripts = packageJson.scripts || {};
+                        const webScripts = ['build', 'start', 'dev', 'serve', 'preview'];
+                        const foundWebScripts = webScripts.filter(script => scripts[script]);
+                        
+                        if (foundWebScripts.length >= 2) {
+                            console.log(`   ✅ Confirmado: scripts web encontrados (${foundWebScripts.join(', ')})`);
+                            return true;
+                        }
+                    }
+                } catch (error) {
+                    console.log(`   ⚠️ Erro ao analisar package.json: ${error.message}`);
+                }
+            }
+
+            // 6. VERIFICAÇÃO DE ESTRUTURA DE DIRETÓRIOS (última tentativa)
             try {
                 const contentsUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents`;
                 const contents = await this.makeRequest(contentsUrl);
 
-                const webFolders = ['public', 'src', 'static', 'assets', 'www', 'client', 'frontend', 'web', 'app'];
-                const hasWebStructure = contents.some(item => 
+                const webFolders = ['public', 'src', 'static', 'assets', 'www', 'dist', 'build'];
+                const foundWebFolders = contents.filter(item => 
                     item.type === 'dir' && webFolders.includes(item.name.toLowerCase())
-                );
+                ).map(item => item.name);
                 
-                const webFiles = contents.some(item =>
+                const webConfigFiles = contents.filter(item =>
                     item.name.toLowerCase().includes('webpack') ||
                     item.name.toLowerCase().includes('vite') ||
-                    item.name.toLowerCase().includes('rollup') ||
                     item.name.toLowerCase().includes('babel') ||
-                    item.name === 'index.html' ||
                     item.name.endsWith('.html')
-                );
+                ).map(item => item.name);
 
-                if (hasWebStructure || webFiles) {
-                    console.log(`   🏗️  Encontrada estrutura de web app`);
+                if (foundWebFolders.length > 0 || webConfigFiles.length > 0) {
+                    console.log(`   ✅ Confirmado: estrutura web detectada (pastas: ${foundWebFolders.join(', ')}, arquivos: ${webConfigFiles.join(', ')})`);
                     return true;
                 }
             } catch (error) {
-                // Erro ao listar conteúdo
+                console.log(`   ⚠️ Erro ao verificar estrutura: ${error.message}`);
             }
 
-            // Fallback: se for JavaScript/TypeScript e não foi explicitamente rejeitado, considera como possível web app
-            if (isWebLanguage && !isNonWebApp) {
-                console.log(`   🌐 Considerado web app por linguagem: ${language}`);
+            // 7. FALLBACK BASEADO NA LINGUAGEM
+            if (isWebLanguage) {
+                console.log(`   🤔 Possível web app por linguagem (${language}), mas sem evidências claras`);
+                // Se chegou até aqui e é linguagem web, assume como web app
                 return true;
             }
 
             console.log(`   ❌ Não identificado como web app`);
             return false;
+
         } catch (error) {
-            console.error(`Erro ao verificar se é web app: ${repo.nameWithOwner}`, error);
+            console.error(`   ❌ Erro ao verificar se é web app: ${error.message}`);
             return false;
         }
     }
