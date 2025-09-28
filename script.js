@@ -451,234 +451,7 @@ class GitHubAccessibilityMiner {
     return null;
   }
 
-  // Novo método isLibraryRepository usando README
-  async isLibraryRepository(repo) {
-    const owner = (repo.owner && repo.owner.login) || "";
-    const name = (repo.name || "").toLowerCase();
-    const fullName = ((repo.full_name || repo.nameWithOwner) || "").toLowerCase();
-    const description = (repo.description || "").toLowerCase();
-
-    // topics pode vir como array de strings (REST) ou não existir; garantir string
-    let topicsArr = [];
-    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
-      topicsArr = repo.repositoryTopics.nodes.map(
-        (n) => ((n && n.topic && n.topic.name) || "").toLowerCase()
-      );
-    } else if (Array.isArray(repo.topics)) {
-      topicsArr = repo.topics.map((t) => (t || "").toLowerCase());
-    } else {
-      topicsArr = [];
-    }
-
-    const homepage = (repo.homepageUrl || repo.homepage || "").toLowerCase();
-
-    // 🔹 Tenta buscar o README
-    let readmeContent = "";
-    try {
-      const readme = await this.getReadmeContent(owner, repo.name || repo.nameWithOwner);
-      if (readme) {
-        readmeContent = (readme || "").toLowerCase();
-      }
-    } catch (e) {
-      // Sem README, segue sem ele
-    }
-
-    // 🔹 Combina tudo para análise
-    const combinedText = [
-      description,
-      name,
-      fullName,
-      topicsArr.join(" "),
-      homepage,
-      readmeContent,
-    ].join(" ");
-
-    // Palavras que DEFINITIVAMENTE indicam bibliotecas/componentes
-    const strongLibraryKeywords = [
-      "library",
-      "lib",
-      "biblioteca",
-      "component library",
-      "ui library",
-      "component collection",
-      "design system",
-      "ui components",
-      "react components",
-      "vue components",
-      "angular components",
-      "component kit",
-      "ui kit",
-      "framework",
-      "toolkit",
-      "boilerplate",
-      "template",
-      "starter kit",
-      "starter template",
-      "seed",
-      "skeleton",
-      "scaffold",
-      "generator",
-      "cli tool",
-      "command line",
-      "npm package",
-      "node module",
-      "plugin",
-      "extension",
-      "addon",
-      "middleware",
-      "utility",
-      "utils",
-      "utilities",
-      "helper",
-      "helpers",
-      "sdk",
-      "api client",
-      "wrapper",
-      "binding",
-      "polyfill",
-      "shim",
-      "mock",
-      "stub",
-      "collection",
-      // 🔹 Palavras comuns no README de libs
-      "npm install",
-      "yarn add",
-      "composer require",
-      "pip install",
-      "gem install",
-      "usage",
-      "installation",
-      "import ",
-      "require(",
-    ];
-
-    // Padrões no nome que indicam bibliotecas
-    const libraryNamePatterns = [
-      /^react-/,
-      /^vue-/,
-      /^angular-/,
-      /^ng-/,
-      /^@[^/]+\//, // Prefixos comuns
-      /-ui$/,
-      /-components$/,
-      /-lib$/,
-      /-kit$/,
-      /-utils$/,
-      /-helpers$/, // Sufixos
-      /^ui-/,
-      /^lib-/,
-      /^utils-/,
-      /^helper-/,
-      /^tool-/,
-      /^cli-/, // Prefixos específicos
-      /-boilerplate$/,
-      /-template$/,
-      /-starter$/,
-      /-seed$/,
-      /-skeleton$/,
-    ];
-
-    // Palavras que indicam aplicação REAL
-    const appKeywords = [
-      "web app",
-      "webapp",
-      "web application",
-      "application",
-      "app",
-      "website",
-      "site",
-      "portal",
-      "platform",
-      "dashboard",
-      "admin panel",
-      "management system",
-      "cms",
-      "blog",
-      "e-commerce",
-      "ecommerce",
-      "shop",
-      "store",
-      "marketplace",
-      "social network",
-      "chat app",
-      "messaging",
-      "game",
-      "todo app",
-      "task manager",
-      "project management",
-      "crm",
-      "erp",
-      "saas",
-      "web service",
-      "api server",
-      "backend",
-    ];
-
-    // Verificar padrões fortes de biblioteca no nome
-    const hasLibraryNamePattern = libraryNamePatterns.some(
-      (pattern) => pattern.test(name) || pattern.test(fullName)
-    );
-
-    // Verificar palavras fortes de biblioteca no texto combinado
-    const hasStrongLibraryKeywords = strongLibraryKeywords.some((keyword) =>
-      combinedText.includes(keyword)
-    );
-
-    // Verificar palavras de aplicação
-    const hasAppKeywords = appKeywords.some((keyword) =>
-      combinedText.includes(keyword)
-    );
-
-    // Verificar se é "awesome list" ou coleção
-    const isAwesomeList =
-      combinedText.includes("awesome") ||
-      combinedText.includes("curated list") ||
-      combinedText.includes("collection of") ||
-      combinedText.includes("list of");
-
-    // Verificar se é documentação, tutorial ou exemplo
-    const isDocsOrTutorial =
-      combinedText.includes("documentation") ||
-      combinedText.includes("tutorial") ||
-      combinedText.includes("example") ||
-      combinedText.includes("demo") ||
-      combinedText.includes("sample") ||
-      combinedText.includes("guide");
-
-    // Verificar repositórios de configuração ou dotfiles
-    const isConfigRepo =
-      combinedText.includes("dotfiles") ||
-      combinedText.includes("config") ||
-      combinedText.includes("settings") ||
-      combinedText.includes("configuration");
-
-    // CRITÉRIOS DE EXCLUSÃO (é biblioteca se):
-    const isLibrary =
-      hasLibraryNamePattern ||
-      (hasStrongLibraryKeywords && !hasAppKeywords) ||
-      isAwesomeList ||
-      isDocsOrTutorial ||
-      isConfigRepo;
-
-    // Log para debug
-    if (isLibrary) {
-      const reasons = [];
-      if (hasLibraryNamePattern) reasons.push("nome suspeito");
-      if (hasStrongLibraryKeywords && !hasAppKeywords)
-        reasons.push("palavras de biblioteca");
-      if (isAwesomeList) reasons.push("lista awesome");
-      if (isDocsOrTutorial) reasons.push("docs/tutorial");
-      if (isConfigRepo) reasons.push("configuração");
-      if (readmeContent) reasons.push("README indica biblioteca");
-      console.log(
-        `   📚 Biblioteca detectada (${reasons.join(", ")}): ${repo.full_name || repo.nameWithOwner || ""}`
-      );
-    }
-
-    return isLibrary;
-  }
-
-  isWebApplication(repo) {
+  async isWebApplication(repo) {
     const description = (repo.description || "").toLowerCase();
     const name = (repo.name || "").toLowerCase();
 
@@ -697,207 +470,95 @@ class GitHubAccessibilityMiner {
     // Combinar todas as informações
     const allContent = [description, name, topics.join(" "), homepage].join(" ");
 
-    // Palavras que CONFIRMAM que é uma aplicação web
+    console.log(`   🔍 Verificando se é aplicação web: ${repo.nameWithOwner || repo.full_name}`);
+
+    // INDICADORES POSITIVOS DE APLICAÇÃO WEB (mais inclusivos)
     const webAppKeywords = [
-      // Tipos de aplicação
-      "web application",
-      "web app",
-      "webapp",
-      "website",
-      "web platform",
-      "web portal",
-      "web interface",
-      "web service",
-      "online application",
-      "web based",
-      "browser based",
-      "online platform",
+      // Tipos gerais de aplicação
+      "web application", "web app", "webapp", "website", "web platform", "web portal", 
+      "web interface", "web service", "online application", "web based", "browser based", 
+      "online platform", "application",
 
       // Tipos específicos de aplicação
-      "dashboard",
-      "admin panel",
-      "control panel",
-      "management system",
-      "cms",
-      "content management",
-      "blog platform",
-      "forum",
-      "ecommerce",
-      "e-commerce",
-      "online store",
-      "shop",
-      "marketplace",
-      "social network",
-      "social platform",
-      "community platform",
-      "chat application",
-      "messaging app",
-      "communication platform",
-      "crm",
-      "erp",
-      "saas",
-      "business application",
-      "booking system",
-      "reservation system",
-      "ticketing system",
-      "learning platform",
-      "education platform",
-      "lms",
-      "portfolio site",
-      "personal website",
-      "company website",
-      "news site",
-      "media platform",
-      "publishing platform",
+      "dashboard", "admin panel", "control panel", "management system", "cms", 
+      "content management", "blog platform", "forum", "ecommerce", "e-commerce", 
+      "online store", "shop", "marketplace", "social network", "social platform", 
+      "community platform", "chat application", "messaging app", "communication platform",
+      "crm", "erp", "saas", "business application", "booking system", "reservation system", 
+      "ticketing system", "learning platform", "education platform", "lms", 
+      "portfolio site", "personal website", "company website", "news site", 
+      "media platform", "publishing platform",
 
-      // Indicadores técnicos de aplicação web
-      "frontend",
-      "backend",
-      "fullstack",
-      "full-stack",
-      "single page application",
-      "spa",
-      "progressive web app",
-      "pwa",
-      "responsive",
-      "mobile-first",
-      "cross-platform web",
+      // Indicadores técnicos
+      "frontend", "backend", "fullstack", "full-stack", "single page application", 
+      "spa", "progressive web app", "pwa", "responsive", "mobile-first", 
+      "cross-platform web", "react app", "vue app", "angular app", "node app",
 
       // Contextos de uso
-      "deployed",
-      "hosted",
-      "live demo",
-      "production",
-      "users",
-      "customers",
-      "clients",
-      "visitors",
+      "deployed", "hosted", "live demo", "production", "users", "customers", 
+      "clients", "visitors", "open source web application", "used on websites",
+      
+      // Indicadores do caso BBC Simorgh
+      "bbc", "news website", "news app", "article pages", "amp pages",
+      "reactjs based application", "web experience", "news to readers",
+      "web engineering", "server side render", "ssr"
     ];
 
-    // Palavras que NEGAM que é uma aplicação (bibliotecas, ferramentas, etc.)
-    const nonAppKeywords = [
-      // Bibliotecas e componentes
-      "library",
-      "lib",
-      "component library",
-      "ui library",
-      "design system",
-      "components",
-      "widgets",
-      "elements",
-      "controls",
-      "framework",
-      "toolkit",
-      "sdk",
-      "api client",
-      "wrapper",
-
-      // Ferramentas e utilitários
-      "tool",
-      "utility",
-      "util",
-      "helper",
-      "plugin",
-      "extension",
-      "cli",
-      "command line",
-      "script",
-      "automation",
-      "generator",
-      "builder",
-      "compiler",
-      "bundler",
-
-      // Templates e boilerplates
-      "template",
-      "boilerplate",
-      "starter",
-      "seed",
-      "skeleton",
-      "scaffold",
-      "example",
-      "demo",
-      "sample",
-      "tutorial",
-
-      // Documentação e recursos
-      "documentation",
-      "docs",
-      "guide",
-      "tutorial",
-      "learning",
-      "awesome",
-      "curated",
-      "collection",
-      "list of",
-      "resources",
-
-      // Configuração e setup
-      "config",
-      "configuration",
-      "setup",
-      "dotfiles",
-      "settings",
-    ];
-
-    // Verificar se tem palavras de aplicação web
-    const hasWebAppKeywords = webAppKeywords.some((keyword) =>
-      allContent.includes(keyword)
-    );
-
-    // Verificar se tem palavras que negam aplicação
-    const hasNonAppKeywords = nonAppKeywords.some((keyword) =>
-      allContent.includes(keyword)
-    );
-
-    // Verificar topics específicos que indicam aplicação
+    // Topics específicos que indicam webapp
     const webAppTopics = [
-      "webapp",
-      "web-app",
-      "website",
-      "web-application",
-      "dashboard",
-      "admin-panel",
-      "cms",
-      "ecommerce",
-      "e-commerce",
-      "saas",
-      "platform",
-      "portal",
-      "frontend",
-      "fullstack",
-      "spa",
-      "pwa",
-      "responsive",
-      "bootstrap",
-      "tailwind",
+      "webapp", "web-app", "website", "web-application", "dashboard", "admin-panel",
+      "cms", "ecommerce", "e-commerce", "saas", "platform", "portal", "frontend", 
+      "fullstack", "spa", "pwa", "responsive", "bootstrap", "tailwind", "react",
+      "vue", "angular", "nodejs", "express", "nextjs", "gatsby", "nuxt"
     ];
 
+    // EXCLUSÕES ESPECÍFICAS (apenas casos muito óbvios)
+    const obviousNonAppKeywords = [
+      // Apenas bibliotecas MUITO óbvias
+      "npm package", "node module", "javascript library", "react library", 
+      "vue library", "ui library", "component library", "cli tool", 
+      "command line tool", "plugin for", "extension for",
+      
+      // Documentação/tutoriais óbvios
+      "awesome list", "curated list", "tutorial project", "example project",
+      "learning repository", "educational repository",
+      
+      // Ferramentas de desenvolvimento óbvias
+      "build tool", "bundler", "compiler", "linter", "formatter"
+    ];
+
+    // Verificações
+    const hasWebAppKeywords = webAppKeywords.some((keyword) => allContent.includes(keyword));
     const hasWebAppTopics = topics.some((topic) => webAppTopics.includes(topic));
-
-    // Verificar se tem homepage (aplicações geralmente têm)
     const hasHomepage = !!(homepage && homepage.includes("http"));
+    const hasObviousNonAppKeywords = obviousNonAppKeywords.some((keyword) => allContent.includes(keyword));
 
-    // LÓGICA DE DECISÃO:
-    const isWebApp =
-      (hasWebAppKeywords && !hasNonAppKeywords) || hasWebAppTopics || hasHomepage;
+    // LÓGICA INCLUSIVA: assume que é webapp a menos que seja obviamente uma biblioteca/ferramenta
+    let isWebApp = false;
+    let reason = "";
 
-    // Log para debug
-    if (!isWebApp) {
-      const reasons = [];
-      if (!hasWebAppKeywords) reasons.push("sem palavras de webapp");
-      if (hasNonAppKeywords) reasons.push("tem palavras de biblioteca/ferramenta");
-      if (!hasWebAppTopics) reasons.push("sem topics de webapp");
-      if (!hasHomepage) reasons.push("sem homepage");
-
-      console.log(`   🔍 Não é webapp (${reasons.join(", ")})`);
+    if (hasObviousNonAppKeywords) {
+      isWebApp = false;
+      reason = "biblioteca/ferramenta óbvia";
+    } else if (hasWebAppKeywords || hasWebAppTopics || hasHomepage) {
+      isWebApp = true;
+      const indicators = [];
+      if (hasWebAppKeywords) indicators.push("keywords");
+      if (hasWebAppTopics) indicators.push("topics");
+      if (hasHomepage) indicators.push("homepage");
+      reason = indicators.join(" + ");
     } else {
-      const reasons = [];
-      if (hasWebAppKeywords && !hasNonAppKeywords) reasons.push("palavras de webapp");
-      if (hasWebAppTopics) reasons.push("topics de webapp");
-      if (hasHomepage) reasons.push("tem homepage");
+      // Se não tem indicadores claros, vamos assumir que pode ser webapp
+      // e deixar a detecção de ferramentas decidir
+      isWebApp = true;
+      reason = "assumindo webapp por padrão";
+    }
 
-      console.log(`   ✅ Confirmado como webapp (${reasons.join(", ")})`);
+    // Log detalhado
+    if (isWebApp) {
+      console.log(`   ✅ Identificado como webapp (${reason})`);
+    } else {
+      console.log(`   ❌ Não é webapp (${reason})`);
     }
 
     return isWebApp;
@@ -983,533 +644,6 @@ class GitHubAccessibilityMiner {
     }
   }
 
-  // 1. FILTRO RÁPIDO DE WEBAPP (sem REST) - usando apenas dados GraphQL
-  checkBasicWebAppIndicators(repo) {
-    const name = (repo.name || "").toLowerCase();
-    const description = (repo.description || "").toLowerCase();
-    
-    // Extrair topics
-    const topics = [];
-    if (repo.repositoryTopics && repo.repositoryTopics.nodes) {
-      repo.repositoryTopics.nodes.forEach(topicNode => {
-        if (topicNode.topic && topicNode.topic.name) {
-          topics.push(topicNode.topic.name.toLowerCase());
-        }
-      });
-    }
-    const topicsText = topics.join(" ");
-
-    // Texto combinado para análise
-    const searchText = `${name} ${description} ${topicsText}`;
-
-    // DETECTAR BIBLIOTECAS ÓBVIAS (eliminatórias)
-    const obviousLibraryPatterns = [
-      // Padrões de nome
-      /^(lib|libs)-/,
-      /-lib$/,
-      /-library$/,
-      /^react-/,
-      /^vue-/,
-      /^angular-/,
-      /^jquery-/,
-      /-component$/,
-      /-components$/,
-      /^ui-/,
-      /-ui$/,
-      /^css-/,
-      /-css$/,
-      /^npm-/,
-      /-npm$/,
-      /^node-/,
-      /-node$/,
-      /^js-/,
-      /-js$/,
-      /^webpack-/,
-      /^babel-/,
-      /^eslint-/,
-      /-plugin$/,
-      /-plugins$/,
-      /-utils$/,
-      /-util$/,
-      /-helpers$/,
-      /-helper$/,
-      /-toolkit$/,
-      /-sdk$/,
-      /-api$/,
-      /-client$/,
-      /-wrapper$/,
-    ];
-
-    // Verificar padrões de nome
-    if (obviousLibraryPatterns.some(pattern => pattern.test(name))) {
-      console.log(`   📚 Padrão de biblioteca detectado no nome: ${name}`);
-      return { isWebApp: false, reason: "biblioteca por padrão de nome" };
-    }
-
-    // Keywords que DEFINITIVAMENTE indicam bibliotecas
-    const strongLibraryKeywords = [
-      "npm package",
-      "node module", 
-      "javascript library",
-      "react library",
-      "vue library",
-      "angular library",
-      "css library",
-      "ui library",
-      "component library",
-      "design system",
-      "ui components",
-      "react components",
-      "vue components",
-      "framework",
-      "boilerplate",
-      "template",
-      "starter kit",
-      "cli tool",
-      "command line",
-      "plugin",
-      "extension",
-      "middleware",
-      "utility",
-      "utils",
-      "helper",
-      "sdk",
-      "api client",
-      "wrapper",
-      "polyfill",
-    ];
-
-    if (strongLibraryKeywords.some(keyword => searchText.includes(keyword))) {
-      console.log(`   📚 Keywords de biblioteca detectadas`);
-      return { isWebApp: false, reason: "biblioteca por keywords" };
-    }
-
-    // DETECTAR WEBAPPS POR KEYWORDS FORTES
-    const strongWebAppKeywords = [
-      // Tipos específicos de aplicação
-      "web application",
-      "web app", 
-      "webapp",
-      "website",
-      "dashboard",
-      "admin panel",
-      "control panel",
-      "management system",
-      "cms",
-      "content management",
-      "blog platform",
-      "ecommerce",
-      "e-commerce", 
-      "online store",
-      "shop",
-      "marketplace",
-      "social network",
-      "social platform",
-      "chat application",
-      "forum",
-      "crm",
-      "erp",
-      "saas",
-      "booking system",
-      "ticketing system",
-      "learning platform",
-      "lms",
-      "portfolio site",
-      "company website",
-      "news site",
-      "media platform",
-
-      // Topics específicos que confirmam webapp
-      "frontend",
-      "fullstack",
-      "full-stack", 
-      "single page application",
-      "spa",
-      "progressive web app",
-      "pwa",
-      "deployed",
-      "hosted",
-      "live demo",
-      "production",
-    ];
-
-    const hasStrongWebAppIndicators = strongWebAppKeywords.some(keyword => 
-      searchText.includes(keyword)
-    );
-
-    // Topics específicos que indicam webapp
-    const webAppTopics = [
-      "webapp",
-      "web-app", 
-      "website",
-      "web-application",
-      "dashboard",
-      "admin-panel",
-      "cms",
-      "ecommerce",
-      "e-commerce",
-      "saas",
-      "platform",
-      "portal", 
-      "frontend",
-      "fullstack",
-      "spa",
-      "pwa",
-    ];
-
-    const hasWebAppTopics = topics.some(topic => webAppTopics.includes(topic));
-
-    // Homepage (webapps geralmente têm)
-    const homepage = (repo.homepageUrl || "").toLowerCase();
-    const hasHomepage = !!(homepage && homepage.includes("http"));
-
-    if (hasStrongWebAppIndicators || hasWebAppTopics) {
-      console.log(`   ✅ Indicadores fortes de webapp detectados`);
-      return { isWebApp: true, reason: "indicadores fortes de webapp" };
-    }
-
-    if (hasHomepage) {
-      console.log(`   ✅ Homepage presente - possível webapp`);
-      return { isWebApp: true, reason: "tem homepage" };
-    }
-
-    // Se chegou aqui: não tem sinais claros, precisa de verificação mais profunda
-    console.log(`   🤔 Sinais ambíguos - precisa verificação detalhada`);
-    return { isWebApp: null, reason: "ambíguo" };
-  }
-
-  // 2. DETECÇÃO RÁPIDA DE FERRAMENTAS (Quick Scan) - incluindo arquivos chave
-  async quickToolScan(repo) {
-    const description = (repo.description || "").toLowerCase();
-    const homepageUrl = (repo.homepageUrl || "").toLowerCase();
-    
-    // Extrair topics
-    const topics = [];
-    if (repo.repositoryTopics && repo.repositoryTopics.nodes) {
-      repo.repositoryTopics.nodes.forEach(topicNode => {
-        if (topicNode.topic && topicNode.topic.name) {
-          topics.push(topicNode.topic.name.toLowerCase());
-        }
-      });
-    }
-    const topicsText = topics.join(" ");
-
-    // Texto combinado para busca
-    const searchText = `${description} ${homepageUrl} ${topicsText}`;
-
-    // ETAPA 2A: Verificar descrição/topics primeiro
-    const foundTools = {
-      AXE: false,
-      Pa11y: false,
-      WAVE: false,
-      AChecker: false,
-      Lighthouse: false,
-      Asqatasun: false,
-      HTML_CodeSniffer: false,
-    };
-
-    // Buscar ferramentas na descrição/topics
-    this.searchToolsInContent(searchText, foundTools);
-
-    // Se encontrou algo óbvio, retornar true
-    if (Object.values(foundTools).some(tool => tool)) {
-      const toolsFound = Object.keys(foundTools).filter(key => foundTools[key]);
-      console.log(`   🔍 Quick scan (descrição): ${toolsFound.join(", ")}`);
-      return true;
-    }
-
-    // ETAPA 2B: Verificar arquivos chave rapidamente
-    const owner = (repo.owner && repo.owner.login) || "";
-    const name = repo.name || "";
-    
-    // Lista de arquivos prioritários para quick scan
-    const quickScanFiles = [
-      "package.json",        // Node.js dependencies
-      ".github/workflows/ci.yml",  // Common CI workflow
-      ".github/workflows/test.yml", // Common test workflow  
-      ".github/workflows/main.yml", // Common main workflow
-    ];
-
-    let foundInFiles = false;
-    
-    for (const filePath of quickScanFiles) {
-      try {
-        const content = await this.getFileContent(owner, name, filePath);
-        if (content) {
-          console.log(`   🔍 Quick scan: Verificando ${filePath}...`);
-          
-          // Reset foundTools para esta verificação
-          const fileFoundTools = {
-            AXE: false,
-            Pa11y: false,
-            WAVE: false,
-            AChecker: false,
-            Lighthouse: false,
-            Asqatasun: false,
-            HTML_CodeSniffer: false,
-          };
-          
-          // Usar searchToolsInContent para encontrar ferramentas
-          this.searchToolsInContent(content, fileFoundTools);
-          
-          if (Object.values(fileFoundTools).some(tool => tool)) {
-            const toolsFound = Object.keys(fileFoundTools).filter(key => fileFoundTools[key]);
-            console.log(`   🔍 Quick scan (${filePath}): ${toolsFound.join(", ")}`);
-            foundInFiles = true;
-            break; // Encontrou, não precisa verificar outros arquivos
-          }
-          
-          // Para package.json, também verificar se é projeto web moderno
-          if (filePath === "package.json") {
-            try {
-              const pkg = JSON.parse(content);
-              const webDevKeywords = [
-                "react", "vue", "angular", "svelte", "next", "nuxt", "gatsby",
-                "express", "fastify", "koa", "nestjs",
-                "webpack", "vite", "parcel", "rollup",
-                "jest", "cypress", "playwright", "testing-library",
-                "eslint", "prettier", "typescript"
-              ];
-              
-              const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
-              const hasWebDevDeps = Object.keys(dependencies).some(dep => 
-                webDevKeywords.some(keyword => dep.includes(keyword))
-              );
-              
-              if (hasWebDevDeps) {
-                console.log(`   🔍 Quick scan: Projeto web moderno detectado em package.json`);
-                foundInFiles = true;
-                break;
-              }
-            } catch (e) {
-              // Continuar se package.json não for válido
-            }
-          }
-        }
-      } catch (e) {
-        // Arquivo não existe, continuar
-      }
-    }
-
-    if (foundInFiles) {
-      return true;
-    }
-
-    // ETAPA 2C: Se não encontrou workflows comuns, verificar se existe pasta de workflows
-    try {
-      const workflows = await this.getRepositoryContents(owner, name, ".github/workflows");
-      if (workflows && workflows.length > 0) {
-        console.log(`   🔍 Quick scan: Verificando workflows existentes...`);
-        
-        // Verificar até 3 workflows para não ser muito pesado
-        const workflowsToCheck = workflows.slice(0, 3);
-        
-        for (const workflow of workflowsToCheck) {
-          const workflowName = (workflow && workflow.name) || "";
-          if (workflowName.endsWith(".yml") || workflowName.endsWith(".yaml")) {
-            try {
-              const content = await this.getFileContent(owner, name, workflow.path);
-              if (content) {
-                const workflowFoundTools = {
-                  AXE: false,
-                  Pa11y: false,
-                  WAVE: false,
-                  AChecker: false,
-                  Lighthouse: false,
-                  Asqatasun: false,
-                  HTML_CodeSniffer: false,
-                };
-                
-                this.searchToolsInContent(content, workflowFoundTools);
-                
-                if (Object.values(workflowFoundTools).some(tool => tool)) {
-                  const toolsFound = Object.keys(workflowFoundTools).filter(key => workflowFoundTools[key]);
-                  console.log(`   🔍 Quick scan (${workflowName}): ${toolsFound.join(", ")}`);
-                  return true;
-                }
-              }
-            } catch (e) {
-              // Continuar com próximo workflow
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Sem workflows, continuar
-    }
-
-    // ETAPA 2D: Fallback conservador baseado em indicadores gerais
-    const webDevKeywords = [
-      // Frameworks web
-      "react", "vue", "angular", "svelte", "next", "nuxt",
-      "express", "django", "flask", "rails",
-      // Tecnologias frontend
-      "javascript", "typescript", "html", "css",
-      "webpack", "vite", "frontend", "fullstack",
-      // Testing que pode incluir a11y
-      "testing", "jest", "cypress", "playwright",
-      // Qualidade/CI que pode incluir a11y
-      "quality", "ci", "continuous-integration", "github-actions",
-      "eslint", "prettier"
-    ];
-
-    const hasWebDevIndicator = webDevKeywords.some(keyword => 
-      searchText.includes(keyword)
-    );
-
-    if (hasWebDevIndicator) {
-      console.log(`   🔍 Quick scan: Indicadores gerais de web development - prosseguindo`);
-      return true;
-    }
-
-    console.log(`   ❌ Quick scan: Nenhum indicador relevante encontrado`);
-    return false;
-  }
-
-  // 3. VERIFICAÇÃO DETALHADA DE WEBAPP (com REST) - PRIORIDADE MÁXIMA
-  async isRealWebApplication(repo) {
-    const owner = (repo.owner && repo.owner.login) || "";
-    const name = repo.name || "";
-    
-    console.log(`   🔍 Verificação detalhada de webapp...`);
-
-    try {
-      // 1. Buscar arquivos na raiz para detectar tipo de projeto
-      const rootFiles = await this.getRepositoryContents(owner, name);
-      const fileNames = rootFiles.map(f => f.name.toLowerCase());
-
-      // INDICADORES FORTES DE WEBAPP
-      const webAppFiles = [
-        "index.html",
-        "public/index.html", 
-        "src/index.html",
-        "app.html",
-        "main.html",
-        "home.html",
-        "index.php",
-        "app.php",
-        "main.php",
-        "index.jsx",
-        "app.jsx",
-        "index.tsx", 
-        "app.tsx",
-        "app.js",
-        "main.js",
-        "index.js",
-        "server.js",
-        "app.py",
-        "main.py",
-        "manage.py", // Django
-        "wsgi.py",
-        "asgi.py",
-      ];
-
-      const hasWebAppFiles = webAppFiles.some(file => 
-        fileNames.some(fn => fn.includes(file))
-      );
-
-      // INDICADORES DE FRAMEWORK WEB
-      const webFrameworkIndicators = [
-        "package.json", // Node.js
-        "requirements.txt", // Python
-        "composer.json", // PHP
-        "gemfile", // Ruby
-        "go.mod", // Go
-        "cargo.toml", // Rust
-        "pom.xml", // Java Maven
-        "build.gradle", // Java Gradle
-      ];
-
-      const hasFrameworkFiles = webFrameworkIndicators.some(file => 
-        fileNames.includes(file)
-      );
-
-      // 2. Se tem package.json, verificar se é webapp Node.js
-      if (fileNames.includes("package.json")) {
-        try {
-          const packageJson = await this.getFileContent(owner, name, "package.json");
-          if (packageJson) {
-            const pkg = JSON.parse(packageJson);
-            
-            // Scripts que indicam webapp
-            const webAppScripts = ["start", "serve", "dev", "build", "deploy"];
-            const hasWebAppScripts = webAppScripts.some(script => 
-              pkg.scripts && pkg.scripts[script]
-            );
-
-            // Dependências que indicam webapp frontend
-            const frontendDeps = [
-              "react", "vue", "angular", "svelte", "next", "nuxt", "gatsby", 
-              "webpack", "vite", "parcel", "rollup", "express", "fastify", 
-              "koa", "hapi", "nestjs", "bootstrap", "tailwind", "material-ui",
-              "styled-components", "emotion", "chakra-ui"
-            ];
-
-            const dependencies = {
-              ...pkg.dependencies, 
-              ...pkg.devDependencies
-            };
-
-            const hasFrontendDeps = frontendDeps.some(dep => 
-              Object.keys(dependencies).some(key => key.includes(dep))
-            );
-
-            if (hasWebAppScripts || hasFrontendDeps) {
-              console.log(`   ✅ Confirmado: webapp Node.js`);
-              return true;
-            }
-          }
-        } catch (e) {
-          // Continuar verificação mesmo se package.json der erro
-        }
-      }
-
-      // 3. Se tem requirements.txt, verificar se é webapp Python
-      if (fileNames.includes("requirements.txt")) {
-        try {
-          const requirements = await this.getFileContent(owner, name, "requirements.txt");
-          if (requirements) {
-            const pythonWebFrameworks = [
-              "django", "flask", "fastapi", "tornado", "pyramid", 
-              "bottle", "cherrypy", "falcon", "sanic", "quart", "starlette"
-            ];
-
-            const hasWebFramework = pythonWebFrameworks.some(framework => 
-              requirements.toLowerCase().includes(framework)
-            );
-
-            if (hasWebFramework) {
-              console.log(`   ✅ Confirmado: webapp Python`);
-              return true;
-            }
-          }
-        } catch (e) {
-          // Continuar verificação
-        }
-      }
-
-      // 4. Verificar estrutura de pastas típica de webapp
-      const webAppFolders = ["public", "src", "app", "views", "templates", "static", "assets"];
-      const hasWebAppFolders = webAppFolders.some(folder => 
-        fileNames.includes(folder)
-      );
-
-      // 5. DECISÃO FINAL
-      if (hasWebAppFiles || (hasFrameworkFiles && hasWebAppFolders)) {
-        console.log(`   ✅ Confirmado: estrutura de webapp detectada`);
-        return true;
-      }
-
-      console.log(`   ❌ Não confirmado como webapp após verificação detalhada`);
-      return false;
-
-    } catch (error) {
-      console.log(`   ⚠️ Erro na verificação detalhada: ${error.message}`);
-      // Em caso de erro, ser conservador e assumir que pode ser webapp
-      return true;
-    }
-  }
-
   async analyzeRepository(repo) {
     const owner = (repo.owner && repo.owner.login) || "";
     const name = repo.name || "";
@@ -1520,65 +654,11 @@ class GitHubAccessibilityMiner {
     );
 
     try {
-      // ETAPA 0: Verificar se o repositório está ativo
-      const minDate = new Date("2024-01-01T00:00:00Z");
-      const pushedAt = repo.pushedAt ? new Date(repo.pushedAt) : null;
-      const createdAt = repo.createdAt ? new Date(repo.createdAt) : null;
+      // ÚNICA VERIFICAÇÃO: Commit após 1º de setembro de 2024
+      const minDate = new Date("2024-09-01T00:00:00Z");
       
-      const twoYearsAgo = new Date();
-      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-      
-      const stars = repo.stargazerCount || repo.stargazers_count || 0;
-      const isRecentRepo = createdAt && createdAt >= twoYearsAgo;
-      const hasRecentPush = pushedAt && pushedAt >= minDate;
-      const isPopular = stars >= 10;
-      
-      if (!isRecentRepo && !hasRecentPush && !isPopular) {
-        const lastPushStr = pushedAt ? pushedAt.toLocaleDateString('pt-BR') : 'nunca';
-        console.log(`   📅 Repositório inativo (último push: ${lastPushStr}, ${stars} ⭐), pulando...`);
-        return null;
-      }
-
-      // ETAPA 1: FILTRO RÁPIDO DE WEBAPP (sem REST)
-      console.log(`   🔍 Etapa 1: Verificação rápida de webapp...`);
-      const webAppCheck = this.checkBasicWebAppIndicators(repo);
-      
-      if (webAppCheck.isWebApp === false) {
-        console.log(`   📚 Não é webapp (${webAppCheck.reason}), pulando...`);
-        return null;
-      }
-
-      // ETAPA 2: DETECÇÃO RÁPIDA DE FERRAMENTAS (Quick Scan)
-      console.log(`   🔍 Etapa 2: Busca rápida de ferramentas...`);
-      if (!await this.quickToolScan(repo)) {
-        console.log(`   ❌ Nenhuma ferramenta detectada no quick scan, pulando...`);
-        return null;
-      }
-
-      // ETAPA 3: VERIFICAÇÕES DETALHADAS COM REST (apenas candidatos fortes)
-      console.log(`   🔍 Etapa 3: Verificações detalhadas...`);
-
-      // 3.1: Verificar se realmente é biblioteca (REST)
-      if (await this.isLibraryRepository(repo)) {
-        console.log(`   📚 Biblioteca/ferramenta detectada após análise detalhada, pulando...`);
-        return null;
-      }
-
-      // 3.2: VERIFICAÇÃO DETALHADA DE WEBAPP (PRIORIDADE MÁXIMA)
-      // Se teve resultado ambíguo na etapa 1, fazer verificação completa
-      if (webAppCheck.isWebApp === null) {
-        const isReallyWebApp = await this.isRealWebApplication(repo);
-        if (!isReallyWebApp) {
-          console.log(`   ❌ Não confirmado como webapp após verificação detalhada, pulando...`);
-          return null;
-        }
-      }
-
-      console.log(`   ✅ Passou em todas as verificações - iniciando busca detalhada...`);
-
-      // Buscar informações do último commit para registro
-      let lastCommitDate = pushedAt;
-      let lastCommitSha = null;
+      // Buscar o último commit real via REST API
+      let lastCommitDate = null;
       try {
         const branch = (repo.defaultBranchRef && repo.defaultBranchRef.name) || "main";
         const commitsUrl = `${this.restUrl}/repos/${owner}/${name}/commits?sha=${branch}&per_page=1`;
@@ -1588,14 +668,32 @@ class GitHubAccessibilityMiner {
           const dateStr = commit.commit && commit.commit.committer && commit.commit.committer.date;
           if (dateStr) {
             lastCommitDate = new Date(dateStr);
-            lastCommitSha = commit.sha;
           }
         }
       } catch (e) {
-        // Usar pushedAt se não conseguir buscar commits
+        // Se falhar, tentar usar pushedAt como fallback
+        const pushedAt = repo.pushedAt ? new Date(repo.pushedAt) : null;
+        if (pushedAt) {
+          lastCommitDate = pushedAt;
+        }
       }
 
-      // ETAPA 4: BUSCA DETALHADA DE FERRAMENTAS (apenas candidatos confirmados)
+      // Verificar se tem commit após 1º de setembro de 2024
+      if (!lastCommitDate || lastCommitDate < minDate) {
+        const lastCommitStr = lastCommitDate ? lastCommitDate.toLocaleDateString('pt-BR') : 'nunca';
+        console.log(`   📅 Último commit anterior a 01/09/2024 (${lastCommitStr}), pulando...`);
+        return null;
+      }
+
+      console.log(`   ✅ Último commit: ${lastCommitDate.toLocaleDateString('pt-BR')} - prosseguindo...`);
+
+      // Verificar se é aplicação web (otimizado para performance)
+      if (!await this.isWebApplication(repo)) {
+        console.log(`   ❌ Não identificado como aplicação web, pulando...`);
+        return null;
+      }
+
+      // BUSCA DE FERRAMENTAS (sem filtros adicionais)
       const foundTools = {
         AXE: false,
         Pa11y: false,
@@ -1606,18 +704,18 @@ class GitHubAccessibilityMiner {
         HTML_CodeSniffer: false,
       };
 
-      console.log(`   🔍 Etapa 4: Busca detalhada de ferramentas...`);
+      console.log(`   🔍 Buscando ferramentas de acessibilidade...`);
 
-      // 4.1: Verificar descrição/about do repositório (dados GraphQL)
+      // Verificar descrição/about do repositório (dados GraphQL)
       await this.checkRepositoryAbout(repo, foundTools);
 
-      // 4.2: Verificar arquivos de configuração (REST)
+      // Verificar arquivos de configuração (REST)
       await this.checkConfigFiles(owner, name, foundTools);
 
-      // 4.3: Verificar arquivos de dependências (REST)
+      // Verificar arquivos de dependências (REST)
       await this.checkDependencyFiles(owner, name, foundTools);
 
-      // 4.4: Verificar workflows (REST)
+      // Verificar workflows (REST)
       await this.checkWorkflows(owner, name, foundTools);
 
       const hasAnyTool = Object.values(foundTools).some((tool) => tool);
@@ -1629,12 +727,12 @@ class GitHubAccessibilityMiner {
         return {
           repository: fullName,
           stars: repo.stargazerCount || repo.stargazers_count || 0,
-          lastCommit: lastCommitDate ? lastCommitDate.toISOString() : (pushedAt ? pushedAt.toISOString() : new Date().toISOString()),
+          lastCommit: lastCommitDate.toISOString(),
           ...foundTools,
         };
       }
 
-      console.log(`   ❌ Nenhuma ferramenta encontrada na busca detalhada`);
+      console.log(`   ❌ Nenhuma ferramenta de acessibilidade encontrada`);
       return null;
     } catch (error) {
       console.log(`   ⚠️ Erro: ${error.message}`);
