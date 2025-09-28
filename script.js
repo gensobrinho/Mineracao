@@ -269,9 +269,9 @@ class GitHubMiner {
         const query = `
             query searchRepos($cursor: String) {
                 search(
-                    query: "pushed:>2024-09-01 is:public (webapp OR web-app OR website OR dashboard OR frontend OR web) NOT library NOT framework NOT plugin NOT component NOT template NOT starter NOT boilerplate NOT mobile NOT android NOT ios NOT desktop NOT cli NOT tool NOT example NOT tutorial NOT awesome",
+                    query: "pushed:>2024-09-01 is:public language:JavaScript OR language:TypeScript OR language:HTML OR language:PHP OR language:Python",
                     type: REPOSITORY,
-                    first: 20,
+                    first: 50,
                     after: $cursor
                 ) {
                     repositoryCount
@@ -311,6 +311,13 @@ class GitHubMiner {
 
         try {
             const result = await this.graphqlQuery(query, { cursor });
+            
+            if (result.errors) {
+                console.error('Erros na consulta GraphQL:', result.errors);
+                throw new Error('Erro na consulta GraphQL');
+            }
+            
+            console.log(`📊 Total de repositórios encontrados na busca: ${result.data.search.repositoryCount}`);
             return result.data.search;
         } catch (error) {
             console.error('Erro na consulta GraphQL:', error);
@@ -324,20 +331,88 @@ class GitHubMiner {
         const name = repo.nameWithOwner.toLowerCase();
         const topics = repo.repositoryTopics?.nodes?.map(t => t.topic.name.toLowerCase()) || [];
 
+        // Palavras-chave mais específicas para bibliotecas
+        const libraryKeywords = [
+            'library', 'framework', 'plugin', 'component', 'util', 'utils',
+            'helper', 'helpers', 'boilerplate', 'template', 'starter', 'kit',
+            'cli', 'tool', 'tools', 'awesome', 'collection', 'list',
+            'examples', 'example', 'tutorial', 'tutorials', 'demo', 'demos',
+            'sample', 'samples', 'docs', 'documentation', 'guide', 'guides',
+            'npm package', 'pip package', 'gem', 'composer package',
+            'ui kit', 'design system', 'components library',
+            'react component', 'vue component', 'angular component'
+        ];
+
+        // Apps não-web mais específicos
+        const nonWebKeywords = [
+            'mobile app', 'android app', 'ios app', 'desktop app',
+            'electron app', 'native app', 'flutter app', 'react native',
+            'xamarin', 'unity', 'game', 'cli tool', 'command line',
+            'terminal', 'console', 'api only', 'backend only',
+            'microservice', 'rest api', 'graphql api', 'server only'
+        ];
+
         // Verifica palavras-chave na descrição e nome
-        const hasLibraryKeywords = LIBRARY_KEYWORDS.some(keyword =>
+        const hasLibraryKeywords = libraryKeywords.some(keyword =>
+            description.includes(keyword) || name.includes(keyword)
+        );
+
+        const hasNonWebKeywords = nonWebKeywords.some(keyword =>
             description.includes(keyword) || name.includes(keyword)
         );
 
         // Verifica tópicos que indicam bibliotecas
         const hasLibraryTopics = topics.some(topic =>
-            LIBRARY_KEYWORDS.includes(topic) ||
-            topic.includes('library') ||
-            topic.includes('framework') ||
-            topic.includes('component')
+            libraryKeywords.some(keyword => topic.includes(keyword)) ||
+            topic === 'library' ||
+            topic === 'framework' ||
+            topic === 'component' ||
+            topic === 'plugin' ||
+            topic === 'cli' ||
+            topic === 'npm-package' ||
+            topic === 'package'
         );
 
-        return hasLibraryKeywords || hasLibraryTopics;
+        // Padrões específicos no nome que indicam bibliotecas
+        const libraryNamePatterns = [
+            /^awesome-/,
+            /^.*-awesome$/,
+            /^.*-template$/,
+            /^template-/,
+            /^.*-boilerplate$/,
+            /^boilerplate-/,
+            /^.*-starter$/,
+            /^starter-/,
+            /^.*-kit$/,
+            /^.*-utils$/,
+            /^.*-helpers$/,
+            /^.*-components$/,
+            /^.*-ui$/,
+            /^ui-/,
+            /^.*-cli$/,
+            /^.*-tool$/,
+            /-examples?$/,
+            /-samples?$/,
+            /-demo$/,
+            /-tutorial$/
+        ];
+
+        const hasLibraryNamePattern = libraryNamePatterns.some(pattern => 
+            pattern.test(name)
+        );
+
+        const isLibrary = hasLibraryKeywords || hasLibraryTopics || hasLibraryNamePattern || hasNonWebKeywords;
+
+        if (isLibrary) {
+            const reasons = [];
+            if (hasLibraryKeywords) reasons.push('palavras-chave de biblioteca');
+            if (hasNonWebKeywords) reasons.push('palavras-chave não-web');
+            if (hasLibraryTopics) reasons.push('tópicos de biblioteca');
+            if (hasLibraryNamePattern) reasons.push('padrão de nome de biblioteca');
+            console.log(`   📚 É biblioteca/framework: ${reasons.join(', ')}`);
+        }
+
+        return isLibrary;
     }
 
     // Verifica se é uma aplicação web
@@ -346,28 +421,39 @@ class GitHubMiner {
             // Primeiro verifica se tem indicadores óbvios de apps não-web
             const description = (repo.description || '').toLowerCase();
             const name = repo.nameWithOwner.toLowerCase();
+            const language = repo.primaryLanguage?.name?.toLowerCase() || '';
             
             // Rejeita explicitamente apps móveis/desktop
-            const nonWebKeywords = ['mobile', 'android', 'ios', 'desktop', 'electron', 'native', 'flutter', 'react-native', 'xamarin', 'unity', 'cli', 'command line', 'terminal'];
+            const nonWebKeywords = ['mobile', 'android', 'ios', 'desktop', 'electron', 'native', 'flutter', 'react-native', 'xamarin', 'unity', 'cli', 'command line', 'terminal', 'api only', 'backend only'];
             const isNonWebApp = nonWebKeywords.some(keyword => 
                 description.includes(keyword) || name.includes(keyword)
             );
             
             if (isNonWebApp) {
+                console.log(`   🚫 Rejeitado por palavras-chave não-web`);
                 return false;
             }
 
+            // Linguagens que frequentemente indicam aplicações web
+            const webLanguages = ['javascript', 'typescript', 'html', 'css', 'php', 'python', 'ruby', 'vue', 'svelte'];
+            const isWebLanguage = webLanguages.includes(language);
+
             // Verifica arquivos que indicam aplicação web
-            for (const file of WEB_APP_INDICATORS) {
+            let webIndicatorFound = false;
+            for (const file of WEB_APP_INDICATORS.slice(0, 10)) { // Verifica apenas os primeiros 10 para economizar requests
                 try {
                     const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${file}`;
                     await this.makeRequest(url);
-                    return true; // Se encontrou algum arquivo indicador, é uma web app
+                    console.log(`   📁 Encontrado arquivo web: ${file}`);
+                    webIndicatorFound = true;
+                    break; // Se encontrou um, já é suficiente
                 } catch (error) {
                     // Arquivo não encontrado, continua procurando
                     continue;
                 }
             }
+
+            if (webIndicatorFound) return true;
 
             // Verifica package.json para dependências web
             try {
@@ -397,37 +483,60 @@ class GitHubMiner {
                         Object.keys(dependencies).some(key => key.includes(dep))
                     );
                     
-                    if (hasWebDeps) return true;
+                    if (hasWebDeps) {
+                        console.log(`   📦 Encontradas dependências web no package.json`);
+                        return true;
+                    }
                     
                     // Verifica scripts típicos de web apps
                     const scripts = packageJson.scripts || {};
                     const webScripts = ['build', 'start', 'dev', 'serve', 'preview'];
                     const hasWebScripts = webScripts.some(script => scripts[script]);
                     
-                    if (hasWebScripts) return true;
+                    if (hasWebScripts) {
+                        console.log(`   🔧 Encontrados scripts web no package.json`);
+                        return true;
+                    }
                 }
             } catch (error) {
                 // package.json não encontrado ou inválido
             }
 
             // Verifica se tem estrutura típica de web app no diretório raiz
-            const contentsUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents`;
-            const contents = await this.makeRequest(contentsUrl);
+            try {
+                const contentsUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents`;
+                const contents = await this.makeRequest(contentsUrl);
 
-            const webFolders = ['public', 'src', 'static', 'assets', 'www', 'client', 'frontend', 'web'];
-            const hasWebStructure = contents.some(item => 
-                item.type === 'dir' && webFolders.includes(item.name.toLowerCase())
-            );
-            
-            const webFiles = contents.some(item =>
-                item.name.toLowerCase().includes('webpack') ||
-                item.name.toLowerCase().includes('vite') ||
-                item.name.toLowerCase().includes('rollup') ||
-                item.name.toLowerCase().includes('babel') ||
-                item.name === 'index.html'
-            );
+                const webFolders = ['public', 'src', 'static', 'assets', 'www', 'client', 'frontend', 'web', 'app'];
+                const hasWebStructure = contents.some(item => 
+                    item.type === 'dir' && webFolders.includes(item.name.toLowerCase())
+                );
+                
+                const webFiles = contents.some(item =>
+                    item.name.toLowerCase().includes('webpack') ||
+                    item.name.toLowerCase().includes('vite') ||
+                    item.name.toLowerCase().includes('rollup') ||
+                    item.name.toLowerCase().includes('babel') ||
+                    item.name === 'index.html' ||
+                    item.name.endsWith('.html')
+                );
 
-            return hasWebStructure || webFiles;
+                if (hasWebStructure || webFiles) {
+                    console.log(`   🏗️  Encontrada estrutura de web app`);
+                    return true;
+                }
+            } catch (error) {
+                // Erro ao listar conteúdo
+            }
+
+            // Fallback: se for JavaScript/TypeScript e não foi explicitamente rejeitado, considera como possível web app
+            if (isWebLanguage && !isNonWebApp) {
+                console.log(`   🌐 Considerado web app por linguagem: ${language}`);
+                return true;
+            }
+
+            console.log(`   ❌ Não identificado como web app`);
+            return false;
         } catch (error) {
             console.error(`Erro ao verificar se é web app: ${repo.nameWithOwner}`, error);
             return false;
