@@ -2,7 +2,6 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
-// Configuração da API do GitHub - Suporte para múltiplos tokens
 const TOKENS = [
     process.env.GITHUB_TOKEN,
 ].filter(Boolean);
@@ -441,9 +440,21 @@ class GitHubMiner {
     }
 
     // Busca conteúdo de arquivos do repositório
-    async getFileContent(owner, repo, filePath) {
+    async getFileContent(repo, filePath) {
         try {
-            const url = `${BASE_URL}/repos/${owner}/${repo}/contents/${filePath}`;
+            let owner, repoName;
+            
+            // Se repo é um objeto com nameWithOwner
+            if (typeof repo === 'object' && repo.nameWithOwner) {
+                [owner, repoName] = repo.nameWithOwner.split('/');
+            } else if (typeof repo === 'string') {
+                // Se é uma string no formato "owner/repo"
+                [owner, repoName] = repo.split('/');
+            } else {
+                throw new Error('Formato de repositório inválido');
+            }
+            
+            const url = `${BASE_URL}/repos/${owner}/${repoName}/contents/${filePath}`;
             const content = await this.makeRequest(url);
             if (content && content.content) {
                 return Buffer.from(content.content, 'base64').toString('utf8');
@@ -473,7 +484,7 @@ class GitHubMiner {
             for (const file of rootContents) {
                 if (file && typeof file.name === 'string' && /^README\.[^/]+$/i.test(file.name)) {
                     try {
-                        const content = await this.getFileContent(owner, repo, file.name);
+                        const content = await this.getFileContent(`${owner}/${repo}`, file.name);
                         if (content) return content;
                     } catch (e) {
                         continue;
@@ -1145,7 +1156,7 @@ class GitHubMiner {
                     console.log(`\n📊 Buscando repositórios... (cursor: ${cursor || 'inicial'})`);
 
                     const searchResult = await this.searchRepositories(query, cursor);
-                    const repositories = searchResult.data?.search?.nodes || [];
+                    const repositories = searchResult.items || [];
 
                     console.log(`🔍 Encontrados ${repositories.length} repositórios para análise`);
 
@@ -1201,8 +1212,8 @@ class GitHubMiner {
                     }
 
                     // Atualiza cursor e estado
-                    hasNextPage = searchResult.data?.search?.pageInfo?.hasNextPage || false;
-                    cursor = searchResult.data?.search?.pageInfo?.endCursor;
+                    hasNextPage = searchResult.pageInfo?.hasNextPage || false;
+                    cursor = searchResult.pageInfo?.endCursor;
 
                     // Salva estado a cada página
                     this.saveState();
@@ -1249,7 +1260,7 @@ class GitHubMiner {
 
 // Execução principal
 async function main() {
-    if (!GITHUB_TOKEN) {
+    if (!TOKENS || TOKENS.length === 0) {
         console.error('❌ Token do GitHub não encontrado. Configure a variável de ambiente GITHUB_TOKEN');
         process.exit(1);
     }
