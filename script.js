@@ -1,935 +1,704 @@
-const fetch = require("node-fetch");
-const fs = require("fs");
-const path = require("path");
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
 
-class GitHubAccessibilityMiner {
-  constructor() {
-    this.tokens = [
-      process.env.GITHUB_TOKEN,
-    ].filter(Boolean);
-    this.tokenIndex = 0;
-    this.token = this.tokens[0];
-    this.tokenLimits = Array(this.tokens.length).fill(null);
-    this.graphqlUrl = "https://api.github.com/graphql";
-    this.restUrl = "https://api.github.com";
-    this.csvFile = "repositorios_acessibilidade.csv";
-    this.processedReposFile = "processed_repos.json";
-    this.statsCsvFile = "stats.csv";
-    this.maxRunMillis = (5 * 60 + 59) * 60 * 1000; // 5h59min em ms
-    this.timeoutTriggered = false;
-    this.processedRepos = this.loadProcessedRepos();
-    this.seenRepos = new Set(); // Para evitar duplicatas durante a execução
+// Configuração da API do GitHub
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const BASE_URL = 'https://api.github.com';
+const GRAPHQL_URL = 'https://api.github.com/graphql';
+const CSV_FILE = 'repositorios_acessibilidade.csv';
+const STATE_FILE = 'mining_state.json';
+
+// Ferramentas de acessibilidade a serem procuradas
+const ACCESSIBILITY_TOOLS = [
+    'AXE',
+    'Pa11y',
+    'WAVE',
+    'AChecker',
+    'Lighthouse',
+    'Asqatasun',
+    'HTML_CodeSniffer'
+];
+
+// Arquivos específicos que indicam presença das ferramentas
+const TOOL_FILES = [
+    '.pa11yci.json',
+    '.lighthouseci.json',
+    '.html_codesniffer.json',
+    'pa11y.json',
+    'lighthouse.json',
+    'axe.json',
+    'wave.json',
+    '.pa11y.json',
+    '.lighthouse.json',
+    '.axe.json',
+    '.wave.json',
+    'pa11y.js',
+    'pa11yci.js'
+];
+
+// Arquivos de dependências a serem analisados
+const DEPENDENCY_FILES = [
+    'package.json',
+    'composer.json',
+    'requirements.txt',
+    'Gemfile',
+    'pom.xml',
+    'build.gradle',
+    'yarn.lock',
+    'package-lock.json'
+];
+
+// Arquivos de workflow que podem indicar uso das ferramentas
+const WORKFLOW_FILES = [
+    '.github/workflows'
+];
+
+// Indicadores de que é uma aplicação web
+const WEB_APP_INDICATORS = [
+    // Arquivos HTML principais
+    'public/index.html',
+    'src/index.html',
+    'index.html',
+    'dist/index.html',
     
-    // Adicionar repositórios pulados do CSV
-    const skippedCsv = 'repositorios_pulados.csv';
-    if (fs.existsSync(skippedCsv)) {
-      const lines = fs.readFileSync(skippedCsv, 'utf8').split('\n');
-      for (let i = 1; i < lines.length; i++) {
-        const repo = lines[i].trim();
-        if (repo) this.processedRepos.add(repo);
-      }
-      this.saveProcessedRepos();
-      console.log(`📋 Adicionados ${lines.length-1} repositórios pulados ao processed_repos.json`);
-    }
+    // Configurações de bundlers web
+    'webpack.config.js',
+    'vite.config.js',
+    'rollup.config.js',
+    'parcel.config.js',
     
-    this.perPage = 100;
-    this.startTime = Date.now();
+    // Frameworks web específicos
+    'next.config.js',
+    'nuxt.config.js',
+    'vue.config.js',
+    'angular.json',
+    'gatsby-config.js',
+    'svelte.config.js',
+    'remix.config.js',
+    
+    // Arquivos de servidor web
+    'server.js',
+    'app.js',
+    'main.js',
+    'index.js',
+    
+    // Estruturas típicas de web apps
+    'public/',
+    'static/',
+    'assets/',
+    'www/',
+    'build/',
+    'dist/',
+    
+    // Arquivos de configuração web
+    'babel.config.js',
+    'postcss.config.js',
+    'tailwind.config.js',
+    '.babelrc',
+    
+    // Docker para web apps
+    'Dockerfile',
+    'docker-compose.yml'
+];
 
-    // Ferramentas de acessibilidade (multi-linguagem)
-    this.accessibilityTools = {
-      AXE: [
-        "axe-core", "axe", "@axe-core", "react-axe", "axe-selenium",
-        "cypress-axe", "jest-axe", "axe-playwright", "axe-webdriverjs", "vue-axe",
-        "axe-selenium-python", "pytest-axe", "axe-core-python",
-        "axe-selenium-java", "axe-core-maven", "axe-core-api",
-        "selenium.axe", "axe.core", "axe-core-nuget",
-        "axe-core-rspec", "axe-matchers", "axe-core-capybara",
-        "axe-core-php", "dmore/chrome-mink-driver",
-      ],
-      Pa11y: [
-        "pa11y", "pa11y-ci", "@pa11y", "pa11y-webdriver", "pa11y-reporter-cli",
-        "pa11y-python", "accessibility-checker-python", "pa11y-dashboard", "koa-pa11y",
-      ],
-      WAVE: ["wave", "wave-cli", "wave-accessibility", "webaim-wave"],
-      AChecker: [
-        "achecker", "accessibility-checker", "ibma/equal-access",
-        "equal-access", "accessibility-checker-engine",
-      ],
-      Lighthouse: [
-        "lighthouse", "@lighthouse", "lighthouse-ci", "lhci", "lighthouse-batch",
-        "lighthouse-plugin-accessibility", "lighthouse-ci-action",
-        "pylighthouse", "lighthouse-python", "lighthouse-badges", "lighthouse-keeper",
-      ],
-      Asqatasun: ["asqatasun", "asqata-sun", "tanaguru", "contrast-finder"],
-      HTML_CodeSniffer: [
-        "html_codesniffer", "htmlcs", "squizlabs/html_codesniffer",
-        "pa11y-reporter-htmlcs", "htmlcodesniffer", "html-codesniffer",
-      ],
-    };
+// Palavras-chave que indicam bibliotecas (para filtrar)
+const LIBRARY_KEYWORDS = [
+    'library',
+    'framework',
+    'plugin',
+    'component',
+    'util',
+    'helper',
+    'boilerplate',
+    'template',
+    'starter',
+    'kit',
+    'cli',
+    'tool',
+    'awesome',
+    'mobile',
+    'android',
+    'ios',
+    'desktop',
+    'electron',
+    'native',
+    'flutter',
+    'react-native'
+];
 
-    // Arquivos de configuração
-    this.configFiles = [
-      ".pa11yci.json", ".pa11yci.yaml", ".lighthouseci.json", ".html_codesniffer.json",
-      "pa11y.json", "lighthouse.json", "axe.json", "wave.json",
-      ".pa11y.json", ".lighthouse.json", ".axe.json", ".wave.json",
-      "pa11y.js", "pa11yci.js", ".pa11yrc", ".pa11yrc.json", "lhci.json",
-    ];
-
-    this.stats = {
-      analyzed: 0,
-      saved: 0,
-      errors: 0,
-      skipped: 0,
-      duplicates: 0,
-      libraries: 0,
-      nonWebApps: 0,
-      inactive: 0,
-      startTime: new Date().toISOString(),
-    };
-    this.loadReposFromCSV();
-    this.initializeCSV();
-  }
-
-  initializeCSV() {
-    if (!fs.existsSync(this.csvFile)) {
-      const headers = [
-        "Repositório", "Número de Estrelas", "Último Commit",
-        "AXE", "Pa11y", "WAVE", "AChecker", "Lighthouse", "Asqatasun", "HTML_CodeSniffer",
-      ].join(",");
-      fs.writeFileSync(this.csvFile, headers + "\n");
+class GitHubMiner {
+    constructor() {
+        this.analyzedCount = 0;
+        this.savedCount = 0;
+        this.processedRepos = new Set();
+        this.currentCursor = null;
+        this.loadState();
+        this.initializeCSV();
     }
-  }
 
-  loadReposFromCSV() {
-    try {
-      if (fs.existsSync(this.csvFile)) {
-        const csvContent = fs.readFileSync(this.csvFile, 'utf8');
-        const lines = csvContent.split('\n');
-
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (line) {
-            const columns = line.split(',');
-            const repoName = columns[0];
-            if (repoName && !this.processedRepos.has(repoName)) {
-              this.processedRepos.add(repoName);
+    // Carrega o estado anterior da mineração
+    loadState() {
+        try {
+            if (fs.existsSync(STATE_FILE)) {
+                const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+                this.currentCursor = state.cursor;
+                this.processedRepos = new Set(state.processedRepos || []);
+                console.log(`Estado carregado: ${this.processedRepos.size} repositórios já processados`);
             }
-          }
+        } catch (error) {
+            console.error('Erro ao carregar estado:', error);
         }
-        console.log(`📋 Carregados ${this.processedRepos.size} repositórios do CSV e JSON`);
-      }
-    } catch (error) {
-      console.log(`⚠️ Erro ao carregar repositórios do CSV: ${error.message}`);
     }
-  }
 
-  loadProcessedRepos() {
-    try {
-      if (fs.existsSync(this.processedReposFile)) {
-        const data = JSON.parse(fs.readFileSync(this.processedReposFile, "utf8"));
-        console.log(`📋 Carregados ${data.length} repositórios já processados`);
-        return new Set(data);
-      }
-    } catch (error) {
-      console.log(`⚠️ Erro ao carregar repositórios processados: ${error.message}`);
-    }
-    return new Set();
-  }
-
-  saveProcessedRepos() {
-    try {
-      fs.writeFileSync(
-        this.processedReposFile,
-        JSON.stringify([...this.processedRepos], null, 2)
-      );
-    } catch (error) {
-      console.log(`⚠️ Erro ao salvar repositórios processados: ${error.message}`);
-    }
-  }
-
-  nextToken() {
-    this.tokenIndex = (this.tokenIndex + 1) % this.tokens.length;
-    this.token = this.tokens[this.tokenIndex];
-  }
-
-  switchTokenIfNeeded(rateLimit) {
-    if (rateLimit !== null && rateLimit <= 0) {
-      let startIndex = this.tokenIndex;
-      let found = false;
-      for (let i = 1; i <= this.tokens.length; i++) {
-        let nextIndex = (startIndex + i) % this.tokens.length;
-        if (!this.tokenLimits[nextIndex] || this.tokenLimits[nextIndex] > 0) {
-          this.tokenIndex = nextIndex;
-          this.token = this.tokens[this.tokenIndex];
-          found = true;
-          break;
+    // Salva o estado atual da mineração
+    saveState() {
+        try {
+            const state = {
+                cursor: this.currentCursor,
+                processedRepos: Array.from(this.processedRepos),
+                lastRun: new Date().toISOString()
+            };
+            fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+        } catch (error) {
+            console.error('Erro ao salvar estado:', error);
         }
-      }
-      if (!found) {
-        console.log('⏳ Todos os tokens atingiram o rate limit. Aguardando reset...');
-      }
-    }
-  }
-
-  async makeGraphQLRequest(query, variables = {}) {
-    const options = {
-      method: "POST",
-      headers: {
-        "User-Agent": "GitHub-Accessibility-Miner-Action",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.token}`,
-      },
-      body: JSON.stringify({ query, variables }),
-      timeout: 20000,
-    };
-
-    const response = await fetch(this.graphqlUrl, options);
-    const rateLimit = parseInt(response.headers.get("x-ratelimit-remaining"));
-    const resetTime = parseInt(response.headers.get("x-ratelimit-reset"));
-    this.tokenLimits[this.tokenIndex] = rateLimit;
-    this.switchTokenIfNeeded(rateLimit);
-
-    if (rateLimit < 100) {
-      const waitTime = Math.max(resetTime * 1000 - Date.now() + 5000, 0);
-      console.log(
-        `⏳ Rate limit baixo (${rateLimit}), aguardando ${Math.ceil(waitTime / 1000)}s...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-
-    if (result.errors) {
-      throw new Error(`GraphQL Error: ${JSON.stringify(result.errors)}`);
-    }
-
-    return result.data;
-  }
-
-  async makeRestRequest(url) {
-    const options = {
-      headers: {
-        "User-Agent": "GitHub-Accessibility-Miner-Action",
-        Accept: "application/vnd.github.v3+json",
-        Authorization: `token ${this.token}`,
-      },
-      timeout: 20000,
-    };
-
-    const response = await fetch(url, options);
-    const rateLimit = parseInt(response.headers.get("x-ratelimit-remaining"));
-    const resetTime = parseInt(response.headers.get("x-ratelimit-reset"));
-    this.tokenLimits[this.tokenIndex] = rateLimit;
-    this.switchTokenIfNeeded(rateLimit);
-
-    if (rateLimit < 50) {
-      const waitTime = Math.max(resetTime * 1000 - Date.now() + 5000, 0);
-      console.log(
-        `⏳ Rate limit REST baixo (${rateLimit}), aguardando ${Math.ceil(waitTime / 1000)}s...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-    }
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    return await response.json();
-  }
-
-  // Busca otimizada com queries mais específicas e filtros
-  async searchRepositories(query, cursor = null) {
-    const graphqlQuery = `
-    query SearchRepositories($query: String!, $first: Int!, $after: String) {
-      search(query: $query, type: REPOSITORY, first: $first, after: $after) {
-        repositoryCount
-        pageInfo {
-          hasNextPage
-          endCursor
+    // Inicializa o arquivo CSV se não existir
+    initializeCSV() {
+        if (!fs.existsSync(CSV_FILE)) {
+            const header = [
+                'Repositório',
+                'Estrelas',
+                'Último Commit',
+                ...ACCESSIBILITY_TOOLS.map(tool => tool)
+            ].join(',') + '\n';
+            fs.writeFileSync(CSV_FILE, header);
         }
-        nodes {
-          ... on Repository {
-            id
-            name
-            nameWithOwner
-            description
-            url
-            homepageUrl
-            stargazerCount
-            updatedAt
-            createdAt
-            pushedAt
-            primaryLanguage {
-              name
-            }
-            languages(first: 10) {
-              nodes {
-                name
-              }
-            }
-            repositoryTopics(first: 20) {
-              nodes {
-                topic {
-                  name
+    }
+
+    // Faz requisições HTTP com tratamento de erro e retry
+    async makeRequest(url, options = {}) {
+        const maxRetries = 3;
+        let retries = 0;
+
+        while (retries < maxRetries) {
+            try {
+                return await this._httpRequest(url, options);
+            } catch (error) {
+                retries++;
+                if (error.status === 403) {
+                    console.log('Rate limit atingido, aguardando...');
+                    await this.sleep(60000); // Aguarda 1 minuto
+                } else if (retries === maxRetries) {
+                    throw error;
+                } else {
+                    await this.sleep(1000 * retries); // Backoff exponencial
                 }
-              }
             }
-            owner {
-              login
-            }
-            defaultBranchRef {
-              name
-            }
-            isArchived
-            isFork
-            isPrivate
-            licenseInfo {
-              name
-            }
-          }
         }
-      }
-      rateLimit {
-        remaining
-        resetAt
-      }
-    }
-  `;
-
-    const variables = {
-      query: `${query} sort:stars-desc`,
-      first: this.perPage,
-      after: cursor,
-    };
-
-    try {
-      console.log(`🔍 Buscando GraphQL: "${query}"${cursor ? ` - Cursor: ${String(cursor).substring(0, 10)}...` : ""}`);
-      const data = await this.makeGraphQLRequest(graphqlQuery, variables);
-
-      if (data.rateLimit) {
-        console.log(`   📊 Rate limit GraphQL: ${data.rateLimit.remaining} restantes`);
-      }
-
-      return {
-        items: data.search.nodes || [],
-        pageInfo: data.search.pageInfo,
-        totalCount: data.search.repositoryCount,
-      };
-    } catch (error) {
-      console.log(`❌ Erro na busca GraphQL: ${error.message}`);
-      throw error;
-    }
-  }
-
-  // Filtragem antecipada por metadados básicos
-  isRepoEligibleByMetadata(repo) {
-    // Verificar duplicata
-    const repoId = repo.nameWithOwner || repo.full_name || `${(repo.owner && repo.owner.login) || ""}/${repo.name || ""}`;
-    
-    if (this.processedRepos.has(repoId) || this.seenRepos.has(repoId)) {
-      this.stats.duplicates++;
-      return { eligible: false, reason: "duplicata" };
-    }
-    
-    this.seenRepos.add(repoId);
-
-    // Verificar se teve commit após 1º setembro 2024 - CRITÉRIO ÚNICO
-    const minDate = new Date("2024-09-01T00:00:00Z");
-    const pushedAt = repo.pushedAt ? new Date(repo.pushedAt) : null;
-    
-    if (!pushedAt || pushedAt < minDate) {
-      const lastPushStr = pushedAt ? pushedAt.toLocaleDateString('pt-BR') : 'nunca';
-      this.stats.inactive++;
-      return { eligible: false, reason: `sem commit após 01/09/2024 (último push: ${lastPushStr})` };
     }
 
-    // Filtro rápido por linguagem - deve ter linguagem web
-    const primaryLang = (repo.primaryLanguage && repo.primaryLanguage.name) || "";
-    const webLanguages = [
-      "JavaScript", "TypeScript", "Python", "PHP", "Ruby", "Java", "C#",
-      "Go", "Rust", "HTML", "CSS", "Vue", "Svelte", "Dart"
-    ];
-    
-    const hasWebLanguage = webLanguages.includes(primaryLang) || 
-                          (repo.languages && repo.languages.nodes && 
-                           repo.languages.nodes.some(l => webLanguages.includes(l.name)));
+    // Função auxiliar para fazer requisições HTTP
+    _httpRequest(url, options = {}) {
+        return new Promise((resolve, reject) => {
+            const requestOptions = {
+                headers: {
+                    'Authorization': `token ${GITHUB_TOKEN}`,
+                    'User-Agent': 'GitHub-Accessibility-Miner',
+                    'Accept': 'application/vnd.github.v3+json',
+                    ...options.headers
+                },
+                timeout: 30000
+            };
 
-    if (!hasWebLanguage && stars < 20) {
-      return { eligible: false, reason: `linguagem não-web (${primaryLang})` };
-    }
+            if (options.method === 'POST') {
+                requestOptions.method = 'POST';
+            }
 
-    // Filtro rápido por nome - obvias bibliotecas
-    const name = (repo.name || "").toLowerCase();
-    const obviousLibPatterns = [
-      /^lib/, /^@/, /-lib$/, /-ui$/, /-components?$/, /-utils?$/, /-helpers?$/,
-      /^react-/, /^vue-/, /^ng-/, /^angular-/, /-plugin$/, /-extension$/,
-      /^awesome-/, /^collection-/, /^list-/
-    ];
-    
-    if (obviousLibPatterns.some(pattern => pattern.test(name))) {
-      this.stats.libraries++;
-      return { eligible: false, reason: "nome indica biblioteca" };
-    }
-
-    return { eligible: true, reason: "passou filtros básicos" };
-  }
-
-  // Verificação rápida se é biblioteca usando só metadados (sem README)
-  isLibraryRepositoryFast(repo) {
-    const name = (repo.name || "").toLowerCase();
-    const fullName = ((repo.full_name || repo.nameWithOwner) || "").toLowerCase();
-    const description = (repo.description || "").toLowerCase();
-
-    let topicsArr = [];
-    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
-      topicsArr = repo.repositoryTopics.nodes.map(n => ((n && n.topic && n.topic.name) || "").toLowerCase());
-    } else if (Array.isArray(repo.topics)) {
-      topicsArr = repo.topics.map(t => (t || "").toLowerCase());
-    }
-
-    const homepage = (repo.homepageUrl || repo.homepage || "").toLowerCase();
-    const combinedText = [description, name, fullName, topicsArr.join(" "), homepage].join(" ");
-
-    // Palavras que DEFINITIVAMENTE indicam bibliotecas
-    const strongLibraryKeywords = [
-      "library", "lib", "biblioteca", "component library", "ui library", "design system",
-      "ui components", "react components", "vue components", "angular components",
-      "component kit", "ui kit", "framework", "toolkit", "boilerplate", "template",
-      "starter kit", "npm package", "node module", "plugin", "extension", "addon",
-      "middleware", "utility", "utils", "helper", "sdk", "api client", "wrapper",
-      "binding", "polyfill", "collection"
-    ];
-
-    // Padrões no nome
-    const libraryNamePatterns = [
-      /^react-/, /^vue-/, /^angular-/, /^ng-/, /^@[^/]+\//, /-ui$/, /-components?$/,
-      /-lib$/, /-kit$/, /-utils?$/, /-helpers?$/, /^ui-/, /^lib-/, /^utils-/,
-      /-boilerplate$/, /-template$/, /-starter$/, /-seed$/, /-skeleton$/
-    ];
-
-    // Verificações
-    const hasLibraryNamePattern = libraryNamePatterns.some(pattern => 
-      pattern.test(name) || pattern.test(fullName)
-    );
-    
-    const hasStrongLibraryKeywords = strongLibraryKeywords.some(keyword =>
-      combinedText.includes(keyword)
-    );
-
-    const isAwesomeList = combinedText.includes("awesome") ||
-                         combinedText.includes("curated list") ||
-                         combinedText.includes("collection of");
-
-    const isDocsOrTutorial = combinedText.includes("documentation") ||
-                            combinedText.includes("tutorial") ||
-                            combinedText.includes("example") ||
-                            combinedText.includes("demo");
-
-    return hasLibraryNamePattern || hasStrongLibraryKeywords || isAwesomeList || isDocsOrTutorial;
-  }
-
-  // Verificação rápida se é aplicação web
-  isWebApplicationFast(repo) {
-    const description = (repo.description || "").toLowerCase();
-    const name = (repo.name || "").toLowerCase();
-
-    let topics = [];
-    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
-      topics = repo.repositoryTopics.nodes.map(n => ((n && n.topic && n.topic.name) || "").toLowerCase());
-    } else if (Array.isArray(repo.topics)) {
-      topics = repo.topics.map(t => (t || "").toLowerCase());
-    }
-
-    const homepage = (repo.homepageUrl || repo.homepage || "").toLowerCase();
-    const allContent = [description, name, topics.join(" "), homepage].join(" ");
-
-    // Palavras que confirmam aplicação web
-    const webAppKeywords = [
-      "web application", "web app", "webapp", "website", "dashboard", "admin panel",
-      "cms", "ecommerce", "e-commerce", "online store", "saas", "platform", "portal",
-      "frontend", "fullstack", "spa", "pwa", "management system", "crm", "erp"
-    ];
-
-    const hasWebAppKeywords = webAppKeywords.some(keyword => allContent.includes(keyword));
-
-    // Topics específicos que indicam aplicação
-    const webAppTopics = [
-      "webapp", "web-app", "website", "dashboard", "admin-panel", "cms",
-      "ecommerce", "saas", "platform", "frontend", "fullstack", "spa", "pwa"
-    ];
-
-    const hasWebAppTopics = topics.some(topic => webAppTopics.includes(topic));
-    const hasHomepage = !!(homepage && homepage.includes("http"));
-
-    return hasWebAppKeywords || hasWebAppTopics || hasHomepage;
-  }
-
-  async getRepositoryContents(owner, repo, path = "") {
-    const url = `${this.restUrl}/repos/${owner}/${repo}/contents/${path}`;
-
-    try {
-      const contents = await this.makeRestRequest(url);
-      return Array.isArray(contents) ? contents : [contents];
-    } catch (error) {
-      if (error.message && error.message.includes("404")) {
-        return [];
-      }
-      throw error;
-    }
-  }
-
-  async getFileContent(owner, repo, filePath) {
-    try {
-      const content = await this.makeRestRequest(
-        `${this.restUrl}/repos/${owner}/${repo}/contents/${filePath}`
-      );
-      if (content && content.content) {
-        return Buffer.from(content.content, "base64").toString("utf8");
-      }
-    } catch (error) {
-      return null;
-    }
-    return null;
-  }
-
-  async analyzeRepository(repo) {
-    const owner = (repo.owner && repo.owner.login) || "";
-    const name = repo.name || "";
-    const fullName = repo.nameWithOwner || repo.full_name || `${owner}/${name}`;
-
-    console.log(`🔬 Analisando: ${fullName} (⭐ ${repo.stargazerCount || repo.stargazers_count || 0})`);
-
-    try {
-      // Buscar informações do último commit para registro
-      let lastCommitDate = repo.pushedAt ? new Date(repo.pushedAt) : null;
-      try {
-        const branch = (repo.defaultBranchRef && repo.defaultBranchRef.name) || "main";
-        const commitsUrl = `${this.restUrl}/repos/${owner}/${name}/commits?sha=${branch}&per_page=1`;
-        const commits = await this.makeRestRequest(commitsUrl);
-        if (Array.isArray(commits) && commits.length > 0) {
-          const commit = commits[0];
-          const dateStr = commit.commit && commit.commit.committer && commit.commit.committer.date;
-          if (dateStr) {
-            lastCommitDate = new Date(dateStr);
-          }
-        }
-      } catch (e) {
-        // Usar pushedAt se não conseguir buscar commits
-      }
-
-      // Filtrar bibliotecas
-      if (this.isLibraryRepositoryFast(repo)) {
-        console.log(`   📚 Biblioteca/ferramenta detectada, pulando...`);
-        this.stats.libraries++;
-        return null;
-      }
-
-      // Verificar se é aplicação web
-      if (!this.isWebApplicationFast(repo)) {
-        console.log(`   ❌ Não é uma aplicação web, pulando...`);
-        this.stats.nonWebApps++;
-        return null;
-      }
-
-      const foundTools = {
-        AXE: false, Pa11y: false, WAVE: false, AChecker: false,
-        Lighthouse: false, Asqatasun: false, HTML_CodeSniffer: false,
-      };
-
-      // Verificar descrição/about do repositório
-      await this.checkRepositoryAbout(repo, foundTools);
-
-      // Verificar arquivos de configuração
-      await this.checkConfigFiles(owner, name, foundTools);
-
-      // Verificar arquivos de dependências
-      await this.checkDependencyFiles(owner, name, foundTools);
-
-      // Verificar workflows do GitHub
-      await this.checkWorkflows(owner, name, foundTools);
-
-      const hasAnyTool = Object.values(foundTools).some((tool) => tool);
-
-      if (hasAnyTool) {
-        const toolsFound = Object.keys(foundTools).filter((key) => foundTools[key]);
-        console.log(`   ✅ Ferramentas: ${toolsFound.join(", ")}`);
-
-        return {
-          repository: fullName,
-          stars: repo.stargazerCount || repo.stargazers_count || 0,
-          lastCommit: lastCommitDate ? lastCommitDate.toISOString() : (pushedAt ? pushedAt.toISOString() : new Date().toISOString()),
-          ...foundTools,
-        };
-      }
-
-      console.log(`   ❌ Nenhuma ferramenta encontrada`);
-      return null;
-    } catch (error) {
-      console.log(`   ⚠️ Erro: ${error.message}`);
-      this.stats.errors++;
-      return null;
-    }
-  }
-
-  async checkRepositoryAbout(repo, foundTools) {
-    const description = (repo.description || "");
-    let topics = [];
-    if (repo.repositoryTopics && Array.isArray(repo.repositoryTopics.nodes)) {
-      topics = repo.repositoryTopics.nodes.map(n => (n && n.topic && n.topic.name) || "");
-    } else if (Array.isArray(repo.topics)) {
-      topics = repo.topics.map(t => t || "");
-    }
-    const homepage = (repo.homepageUrl || repo.homepage || "");
-
-    const aboutContent = [description, topics.join(" "), homepage].join(" ").toLowerCase();
-
-    if (aboutContent.trim()) {
-      console.log(`     📋 Analisando descrição/about do repositório`);
-      this.searchToolsInContent(aboutContent, foundTools);
-
-      const accessibilityKeywords = [
-        "accessibility", "accessible", "a11y", "wcag", "aria", "screen reader",
-        "keyboard navigation", "color contrast", "accessibility testing",
-        "accessibility audit", "web accessibility", "inclusive design"
-      ];
-
-      if (accessibilityKeywords.some(keyword => aboutContent.includes(keyword))) {
-        console.log(`     ♿ Menção de acessibilidade encontrada na descrição`);
-        
-        const implicitTools = {
-          "accessibility audit": ["AXE", "Pa11y", "Lighthouse"],
-          "accessibility testing": ["AXE", "Pa11y", "WAVE"],
-          "wcag compliance": ["AXE", "AChecker", "WAVE"],
-          "a11y testing": ["AXE", "Pa11y"],
-        };
-
-        for (const [phrase, tools] of Object.entries(implicitTools)) {
-          if (aboutContent.includes(phrase)) {
-            tools.forEach(tool => {
-              if (!foundTools[tool]) {
-                console.log(`     🔍 ${tool} inferido por menção: "${phrase}"`);
-                foundTools[tool] = true;
-              }
+            const req = https.request(url, requestOptions, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                    try {
+                        if (res.statusCode >= 200 && res.statusCode < 300) {
+                            resolve(JSON.parse(data));
+                        } else {
+                            reject({ status: res.statusCode, message: data });
+                        }
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
             });
-          }
-        }
-      }
-    }
-  }
 
-  async checkConfigFiles(owner, name, foundTools) {
-    try {
-      const rootContents = await this.getRepositoryContents(owner, name);
-      for (const file of rootContents) {
-        const fileName = file && file.name ? file.name : "";
-        if (this.configFiles.includes(fileName)) {
-          console.log(`     📄 Config: ${fileName}`);
-          if (fileName.includes("pa11y")) foundTools["Pa11y"] = true;
-          if (fileName.includes("lighthouse") || fileName.includes("lhci")) foundTools["Lighthouse"] = true;
-          if (fileName.includes("axe")) foundTools["AXE"] = true;
-          if (fileName.includes("wave")) foundTools["WAVE"] = true;
-          if (fileName.includes("html_codesniffer")) foundTools["HTML_CodeSniffer"] = true;
-        }
-      }
-    } catch (error) {
-      // Ignorar erros de acesso
-    }
-  }
+            req.on('error', reject);
+            req.on('timeout', () => {
+                req.destroy();
+                reject(new Error('Request timeout'));
+            });
 
-  async checkDependencyFiles(owner, name, foundTools) {
-    const dependencyFiles = [
-      "package.json", "requirements.txt", "Pipfile", "composer.json", "pom.xml",
-      "build.gradle", "Gemfile", "go.mod", "Cargo.toml", "pubspec.yaml"
-    ];
-
-    for (const depFile of dependencyFiles) {
-      try {
-        const content = await this.getFileContent(owner, name, depFile);
-        if (content) {
-          console.log(`     📦 Analisando ${depFile}`);
-          this.searchToolsInContent(content, foundTools);
-        }
-      } catch (error) {
-        // Ignorar arquivos inexistentes
-      }
-    }
-  }
-
-  async checkWorkflows(owner, name, foundTools) {
-    try {
-      const workflows = await this.getRepositoryContents(owner, name, ".github/workflows");
-      for (const workflow of workflows) {
-        const workflowName = (workflow && workflow.name) || "";
-        if (workflowName.endsWith(".yml") || workflowName.endsWith(".yaml")) {
-          const content = await this.getFileContent(owner, name, workflow.path);
-          if (content) {
-            console.log(`     ⚙️ Workflow: ${workflowName}`);
-            this.searchToolsInContent(content, foundTools);
-          }
-        }
-      }
-    } catch (error) {
-      // Ignorar se não tiver workflows
-    }
-  }
-
-  searchToolsInContent(content, foundTools) {
-    const contentLower = (content || "").toLowerCase();
-
-    for (const [toolName, keywords] of Object.entries(this.accessibilityTools)) {
-      if (!foundTools[toolName]) {
-        for (const keyword of keywords) {
-          if (contentLower.includes((keyword || "").toLowerCase())) {
-            foundTools[toolName] = true;
-            console.log(`       🎯 ${toolName} via: ${keyword}`);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  appendToCSV(repositories) {
-    if (repositories.length === 0) return;
-
-    const csvLines = repositories.map((repo) => {
-      return [
-        repo.repository,
-        repo.stars,
-        repo.lastCommit,
-        repo.AXE,
-        repo.Pa11y,
-        repo.WAVE,
-        repo.AChecker,
-        repo.Lighthouse,
-        repo.Asqatasun,
-        repo.HTML_CodeSniffer,
-      ].join(",");
-    });
-
-    fs.appendFileSync(this.csvFile, csvLines.join("\n") + "\n");
-    console.log(`💾 ${repositories.length} repositórios salvos no CSV`);
-  }
-
-  printFinalStatsAndSave() {
-    const analyzed = this.stats.analyzed;
-    const saved = this.stats.saved;
-    const percent = analyzed === 0 ? 0 : ((saved / analyzed) * 100).toFixed(2);
-    console.log("\n⏰ EXECUÇÃO FINALIZADA");
-    console.log(`🔬 Total de repositórios analisados: ${analyzed}`);
-    console.log(`💾 Total de repositórios salvos: ${saved}`);
-    console.log(`⏭️ Repositórios pulados:`);
-    console.log(`   - Duplicatas: ${this.stats.duplicates}`);
-    console.log(`   - Bibliotecas: ${this.stats.libraries}`);
-    console.log(`   - Não-webapps: ${this.stats.nonWebApps}`);
-    console.log(`   - Inativos: ${this.stats.inactive}`);
-    console.log(`❌ Erros: ${this.stats.errors}`);
-    console.log(`📈 Taxa de sucesso: ${percent}%`);
-    
-    const statsContent = [
-      "total_analisados,total_salvos,duplicatas,bibliotecas,nao_webapps,inativos,erros,taxa_sucesso",
-      `${analyzed},${saved},${this.stats.duplicates},${this.stats.libraries},${this.stats.nonWebApps},${this.stats.inactive},${this.stats.errors},${percent}`
-    ].join("\n");
-    fs.writeFileSync(this.statsCsvFile, statsContent);
-    console.log(`📄 Estatísticas salvas em ${this.statsCsvFile}`);
-  }
-
-  shouldContinueRunning() {
-    if (this.timeoutTriggered) return false;
-    const elapsed = Date.now() - this.startTime;
-    if (elapsed >= this.maxRunMillis) {
-      this.timeoutTriggered = true;
-      this.printFinalStatsAndSave();
-      return false;
-    }
-    return true;
-  }
-
-  printProgress() {
-    const elapsed = Date.now() - this.startTime;
-    const hours = Math.floor(elapsed / (1000 * 60 * 60));
-    const minutes = Math.floor((elapsed % (1000 * 60 * 60)) / (1000 * 60));
-
-    console.log(`\n📊 PROGRESSO ATUAL:`);
-    console.log(`⏱️  Tempo decorrido: ${hours}h ${minutes}m`);
-    console.log(`🔬 Repositórios analisados: ${this.stats.analyzed}`);
-    console.log(`💾 Repositórios salvos: ${this.stats.saved}`);
-    console.log(`⏭️  Filtrados por:`);
-    console.log(`   - Duplicatas: ${this.stats.duplicates}`);
-    console.log(`   - Bibliotecas: ${this.stats.libraries}`);
-    console.log(`   - Não-webapps: ${this.stats.nonWebApps}`);
-    console.log(`   - Inativos: ${this.stats.inactive}`);
-    console.log(`❌ Erros: ${this.stats.errors}`);
-    console.log(`📈 Taxa de sucesso: ${(this.stats.saved / Math.max(this.stats.analyzed, 1) * 100).toFixed(1)}%`);
-    console.log(`🗃️  Total processados: ${this.processedRepos.size}\n`);
-  }
-
-  async run() {
-    console.log("🚀 GITHUB ACCESSIBILITY MINER - VERSÃO OTIMIZADA");
-    console.log(`🔑 Token configurado: ${this.token ? "✅" : "❌"}`);
-    console.log(`📊 Repositórios já processados: ${this.processedRepos.size}`);
-    console.log(`📅 Critério de data: commits após 1º setembro 2024`);
-    console.log(`🎯 Foco: aplicações web com ferramentas de acessibilidade\n`);
-
-    // Queries otimizadas com filtros específicos
-    const optimizedQueries = [
-      // Linguagens web + termos de aplicação - excluindo bibliotecas
-      'language:JavaScript "web application" -topic:library -topic:framework stars:>2',
-      'language:TypeScript "web app" -topic:component -topic:ui-library stars:>2',
-      'language:Python "django" OR "flask" OR "fastapi" "web app" -topic:library stars:>2',
-      'language:PHP "web application" -topic:library -topic:package stars:>2',
-      'language:Ruby "rails" "web app" -topic:gem -topic:library stars:>2',
-      'language:Java "spring boot" "web application" -topic:library stars:>2',
-      
-      // Tipos específicos de aplicação
-      'topic:webapp -topic:library -topic:template stars:>1',
-      'topic:dashboard -topic:component -topic:ui-kit stars:>1',
-      'topic:ecommerce "web" -topic:library stars:>1',
-      'topic:cms "web application" -topic:plugin stars:>1',
-      'topic:crm "web" -topic:library stars:>1',
-      'topic:saas "web platform" -topic:framework stars:>1',
-      
-      // Frameworks de aplicação web
-      'topic:react "web application" -topic:component-library -topic:ui-library stars:>2',
-      'topic:vue "web app" -topic:component -topic:ui stars:>2',
-      'topic:angular "web application" -topic:library -topic:component stars:>2',
-      'topic:nextjs "web app" -topic:template -topic:boilerplate stars:>2',
-      'topic:nuxtjs "web application" -topic:template stars:>2',
-      
-      // Contextos de negócio
-      '"management system" web -topic:library stars:>1',
-      '"admin panel" web -topic:component stars:>1',
-      '"online platform" -topic:library stars:>1',
-      '"business application" web -topic:framework stars:>1',
-      
-      // Com menção de acessibilidade
-      'accessibility "web application" -topic:library stars:>0',
-      'a11y "web app" -topic:library stars:>0',
-      'wcag "web" -topic:library stars:>0',
-      '"accessible web" application -topic:library stars:>0',
-    ];
-
-    const foundRepos = [];
-    let queryIndex = 0;
-
-    // Timer de segurança
-    setTimeout(() => {
-      this.timeoutTriggered = true;
-      this.printFinalStatsAndSave();
-      process.exit(0);
-    }, this.maxRunMillis);
-
-    while (this.shouldContinueRunning()) {
-      try {
-        const query = optimizedQueries[queryIndex % optimizedQueries.length];
-        console.log(`\n🔍 Query otimizada ${queryIndex + 1}/${optimizedQueries.length}: "${query}"`);
-
-        let cursor = null;
-        let pageCount = 0;
-        const maxPagesPerQuery = 5; // Reduzido para evitar sobreposição
-
-        do {
-          pageCount++;
-          console.log(`   📄 Página ${pageCount}${cursor ? ` - Cursor: ${String(cursor).substring(0, 10)}...` : ""}`);
-
-          const searchResult = await this.searchRepositories(query, cursor);
-
-          if (!searchResult.items || searchResult.items.length === 0) {
-            console.log(`   📭 Sem resultados nesta página.`);
-            break;
-          }
-
-          let processedInPage = 0;
-          for (const repo of searchResult.items) {
-            if (!this.shouldContinueRunning()) break;
-
-            // Filtro antecipado por metadados
-            const eligibility = this.isRepoEligibleByMetadata(repo);
-            if (!eligibility.eligible) {
-              console.log(`   ⏭️ ${repo.nameWithOwner || repo.name}: ${eligibility.reason}`);
-              continue;
+            if (options.body) {
+                req.write(JSON.stringify(options.body));
             }
 
-            this.stats.analyzed++;
-            processedInPage++;
+            req.end();
+        });
+    }
 
-            const analysis = await this.analyzeRepository(repo);
+    // Faz consulta GraphQL
+    async graphqlQuery(query, variables = {}) {
+        const url = GRAPHQL_URL;
+        const options = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: {
+                query,
+                variables
+            }
+        };
 
-            if (analysis) {
-              foundRepos.push(analysis);
-              this.stats.saved++;
+        return await this.makeRequest(url, options);
+    }
 
-              // Salvar em lotes menores para eficiência
-              if (foundRepos.length >= 3) {
-                this.appendToCSV(foundRepos);
-                foundRepos.forEach((r) => this.processedRepos.add(r.repository));
-                this.saveProcessedRepos();
-                foundRepos.length = 0;
-              }
+    // Busca repositórios usando GraphQL
+    async searchRepositories(cursor = null) {
+        const query = `
+            query searchRepos($cursor: String) {
+                search(
+                    query: "pushed:>2024-09-01 is:public (webapp OR web-app OR website OR dashboard OR frontend OR web) NOT library NOT framework NOT plugin NOT component NOT template NOT starter NOT boilerplate NOT mobile NOT android NOT ios NOT desktop NOT cli NOT tool NOT example NOT tutorial NOT awesome",
+                    type: REPOSITORY,
+                    first: 20,
+                    after: $cursor
+                ) {
+                    repositoryCount
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                    nodes {
+                        ... on Repository {
+                            nameWithOwner
+                            stargazerCount
+                            pushedAt
+                            description
+                            primaryLanguage {
+                                name
+                            }
+                            repositoryTopics(first: 10) {
+                                nodes {
+                                    topic {
+                                        name
+                                    }
+                                }
+                            }
+                            defaultBranchRef {
+                                name
+                                target {
+                                    ... on Commit {
+                                        committedDate
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        `;
+
+        try {
+            const result = await this.graphqlQuery(query, { cursor });
+            return result.data.search;
+        } catch (error) {
+            console.error('Erro na consulta GraphQL:', error);
+            throw error;
+        }
+    }
+
+    // Verifica se o repositório é uma biblioteca/framework
+    isLibrary(repo) {
+        const description = (repo.description || '').toLowerCase();
+        const name = repo.nameWithOwner.toLowerCase();
+        const topics = repo.repositoryTopics?.nodes?.map(t => t.topic.name.toLowerCase()) || [];
+
+        // Verifica palavras-chave na descrição e nome
+        const hasLibraryKeywords = LIBRARY_KEYWORDS.some(keyword =>
+            description.includes(keyword) || name.includes(keyword)
+        );
+
+        // Verifica tópicos que indicam bibliotecas
+        const hasLibraryTopics = topics.some(topic =>
+            LIBRARY_KEYWORDS.includes(topic) ||
+            topic.includes('library') ||
+            topic.includes('framework') ||
+            topic.includes('component')
+        );
+
+        return hasLibraryKeywords || hasLibraryTopics;
+    }
+
+    // Verifica se é uma aplicação web
+    async isWebApplication(repo) {
+        try {
+            // Primeiro verifica se tem indicadores óbvios de apps não-web
+            const description = (repo.description || '').toLowerCase();
+            const name = repo.nameWithOwner.toLowerCase();
+            
+            // Rejeita explicitamente apps móveis/desktop
+            const nonWebKeywords = ['mobile', 'android', 'ios', 'desktop', 'electron', 'native', 'flutter', 'react-native', 'xamarin', 'unity', 'cli', 'command line', 'terminal'];
+            const isNonWebApp = nonWebKeywords.some(keyword => 
+                description.includes(keyword) || name.includes(keyword)
+            );
+            
+            if (isNonWebApp) {
+                return false;
             }
 
-            this.processedRepos.add(repo.nameWithOwner || repo.full_name || `${repo.owner?.login || ""}/${repo.name || ""}`);
+            // Verifica arquivos que indicam aplicação web
+            for (const file of WEB_APP_INDICATORS) {
+                try {
+                    const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${file}`;
+                    await this.makeRequest(url);
+                    return true; // Se encontrou algum arquivo indicador, é uma web app
+                } catch (error) {
+                    // Arquivo não encontrado, continua procurando
+                    continue;
+                }
+            }
 
-            // Pausa entre repos
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
+            // Verifica package.json para dependências web
+            try {
+                const packageUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/package.json`;
+                const packageData = await this.makeRequest(packageUrl);
+                
+                if (packageData.content) {
+                    const content = Buffer.from(packageData.content, 'base64').toString('utf8');
+                    const packageJson = JSON.parse(content);
+                    
+                    // Verifica dependências típicas de web apps
+                    const webDependencies = [
+                        'react', 'vue', 'angular', 'svelte', 'next', 'nuxt', 'gatsby',
+                        'express', 'fastify', 'koa', 'hapi', 'nestjs',
+                        'webpack', 'vite', 'rollup', 'parcel',
+                        'react-dom', 'vue-router', 'react-router',
+                        'axios', 'fetch', 'cors', 'helmet',
+                        'tailwindcss', 'bootstrap', 'material-ui', 'chakra-ui'
+                    ];
+                    
+                    const dependencies = {
+                        ...(packageJson.dependencies || {}),
+                        ...(packageJson.devDependencies || {})
+                    };
+                    
+                    const hasWebDeps = webDependencies.some(dep => 
+                        Object.keys(dependencies).some(key => key.includes(dep))
+                    );
+                    
+                    if (hasWebDeps) return true;
+                    
+                    // Verifica scripts típicos de web apps
+                    const scripts = packageJson.scripts || {};
+                    const webScripts = ['build', 'start', 'dev', 'serve', 'preview'];
+                    const hasWebScripts = webScripts.some(script => scripts[script]);
+                    
+                    if (hasWebScripts) return true;
+                }
+            } catch (error) {
+                // package.json não encontrado ou inválido
+            }
 
-          console.log(`   📊 Página ${pageCount}: ${processedInPage} repos elegíveis processados`);
+            // Verifica se tem estrutura típica de web app no diretório raiz
+            const contentsUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents`;
+            const contents = await this.makeRequest(contentsUrl);
 
-          // Mostrar progresso a cada 25 repos analisados
-          if (this.stats.analyzed % 25 === 0 && this.stats.analyzed > 0) {
-            this.printProgress();
-          }
+            const webFolders = ['public', 'src', 'static', 'assets', 'www', 'client', 'frontend', 'web'];
+            const hasWebStructure = contents.some(item => 
+                item.type === 'dir' && webFolders.includes(item.name.toLowerCase())
+            );
+            
+            const webFiles = contents.some(item =>
+                item.name.toLowerCase().includes('webpack') ||
+                item.name.toLowerCase().includes('vite') ||
+                item.name.toLowerCase().includes('rollup') ||
+                item.name.toLowerCase().includes('babel') ||
+                item.name === 'index.html'
+            );
 
-          // Próxima página
-          if (searchResult.pageInfo?.hasNextPage && pageCount < maxPagesPerQuery) {
-            cursor = searchResult.pageInfo.endCursor;
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          } else {
-            cursor = null;
-          }
-        } while (cursor && this.shouldContinueRunning());
+            return hasWebStructure || webFiles;
+        } catch (error) {
+            console.error(`Erro ao verificar se é web app: ${repo.nameWithOwner}`, error);
+            return false;
+        }
+    }
 
-        queryIndex++;
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      } catch (error) {
-        console.log(`❌ Erro na execução: ${error.message}`);
+    // Verifica a presença de ferramentas de acessibilidade
+    async checkAccessibilityTools(repo) {
+        const toolsFound = {};
+        ACCESSIBILITY_TOOLS.forEach(tool => toolsFound[tool] = false);
 
-        if (error.message.includes("rate limit")) {
-          console.log(`⏳ Rate limit atingido, aguardando 2 minutos...`);
-          await new Promise((resolve) => setTimeout(resolve, 120000));
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+        try {
+            // 1. Verifica arquivos específicos das ferramentas
+            await this.checkToolFiles(repo, toolsFound);
+
+            // 2. Verifica arquivos de dependências
+            await this.checkDependencyFiles(repo, toolsFound);
+
+            // 3. Verifica workflows do GitHub Actions
+            await this.checkWorkflowFiles(repo, toolsFound);
+
+            return toolsFound;
+        } catch (error) {
+            console.error(`Erro ao verificar ferramentas: ${repo.nameWithOwner}`, error);
+            return toolsFound;
+        }
+    }
+
+    // Verifica arquivos específicos das ferramentas
+    async checkToolFiles(repo, toolsFound) {
+        for (const file of TOOL_FILES) {
+            try {
+                const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${file}`;
+                await this.makeRequest(url);
+
+                // Mapeia o arquivo para a ferramenta correspondente
+                if (file.includes('pa11y')) toolsFound['Pa11y'] = true;
+                if (file.includes('lighthouse')) toolsFound['Lighthouse'] = true;
+                if (file.includes('axe')) toolsFound['AXE'] = true;
+                if (file.includes('wave')) toolsFound['WAVE'] = true;
+                if (file.includes('html_codesniffer')) toolsFound['HTML_CodeSniffer'] = true;
+
+            } catch (error) {
+                // Arquivo não encontrado, continua
+                continue;
+            }
+        }
+    }
+
+    // Verifica arquivos de dependências
+    async checkDependencyFiles(repo, toolsFound) {
+        for (const file of DEPENDENCY_FILES) {
+            try {
+                const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${file}`;
+                const response = await this.makeRequest(url);
+
+                if (response.content) {
+                    const content = Buffer.from(response.content, 'base64').toString('utf8');
+                    this.analyzeDependencyContent(content, toolsFound);
+                }
+            } catch (error) {
+                // Arquivo não encontrado, continua
+                continue;
+            }
+        }
+    }
+
+    // Analisa conteúdo dos arquivos de dependências
+    analyzeDependencyContent(content, toolsFound) {
+        const lowerContent = content.toLowerCase();
+
+        if (lowerContent.includes('axe-core') || lowerContent.includes('@axe-core')) {
+            toolsFound['AXE'] = true;
+        }
+        if (lowerContent.includes('pa11y')) {
+            toolsFound['Pa11y'] = true;
+        }
+        if (lowerContent.includes('lighthouse')) {
+            toolsFound['Lighthouse'] = true;
+        }
+        if (lowerContent.includes('wave') && lowerContent.includes('accessibility')) {
+            toolsFound['WAVE'] = true;
+        }
+        if (lowerContent.includes('achecker')) {
+            toolsFound['AChecker'] = true;
+        }
+        if (lowerContent.includes('asqatasun')) {
+            toolsFound['Asqatasun'] = true;
+        }
+        if (lowerContent.includes('html_codesniffer') || lowerContent.includes('htmlcs')) {
+            toolsFound['HTML_CodeSniffer'] = true;
+        }
+    }
+
+    // Verifica workflows do GitHub Actions
+    async checkWorkflowFiles(repo, toolsFound) {
+        try {
+            const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/.github/workflows`;
+            const workflows = await this.makeRequest(url);
+
+            for (const workflow of workflows) {
+                if (workflow.name.endsWith('.yml') || workflow.name.endsWith('.yaml')) {
+                    try {
+                        const workflowUrl = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${workflow.path}`;
+                        const workflowData = await this.makeRequest(workflowUrl);
+
+                        if (workflowData.content) {
+                            const content = Buffer.from(workflowData.content, 'base64').toString('utf8');
+                            this.analyzeDependencyContent(content, toolsFound);
+                        }
+                    } catch (error) {
+                        continue;
+                    }
+                }
+            }
+        } catch (error) {
+            // Sem workflows, continua
+        }
+    }
+
+    // Salva repositório no CSV
+    saveToCSV(repo, toolsFound) {
+        const lastCommit = repo.defaultBranchRef?.target?.committedDate || repo.pushedAt;
+        const row = [
+            `"${repo.nameWithOwner}"`,
+            repo.stargazerCount,
+            lastCommit,
+            ...ACCESSIBILITY_TOOLS.map(tool => toolsFound[tool] ? 'Sim' : 'Não')
+        ].join(',') + '\n';
+
+        fs.appendFileSync(CSV_FILE, row);
+        this.savedCount++;
+        console.log(`✅ Salvo: ${repo.nameWithOwner} (${repo.stargazerCount} ⭐)`);
+    }
+
+    // Função de sleep para aguardar
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Função principal de mineração
+    async mine() {
+        console.log('🚀 Iniciando mineração de repositórios do GitHub...');
+
+        try {
+            let hasNextPage = true;
+            let cursor = this.currentCursor;
+
+            while (hasNextPage) {
+                console.log(`\n📊 Buscando repositórios... (cursor: ${cursor || 'inicial'})`);
+
+                const searchResult = await this.searchRepositories(cursor);
+                const repositories = searchResult.nodes || [];
+
+                console.log(`🔍 Encontrados ${repositories.length} repositórios para análise`);
+
+                for (const repo of repositories) {
+                    // Pula se já foi processado
+                    if (this.processedRepos.has(repo.nameWithOwner)) {
+                        continue;
+                    }
+
+                    this.analyzedCount++;
+                    this.processedRepos.add(repo.nameWithOwner);
+
+                    console.log(`\n🔄 Analisando: ${repo.nameWithOwner} (${repo.stargazerCount} ⭐)`);
+
+                    // Verifica se tem commits após setembro de 2024
+                    const lastCommit = new Date(repo.defaultBranchRef?.target?.committedDate || repo.pushedAt);
+                    if (lastCommit < new Date('2024-09-01')) {
+                        console.log(`⏭️  Pulando: commits muito antigos`);
+                        continue;
+                    }
+
+                    // Verifica se é biblioteca/framework
+                    if (this.isLibrary(repo)) {
+                        console.log(`⏭️  Pulando: é uma biblioteca/framework`);
+                        continue;
+                    }
+
+                    // Verifica se é aplicação web
+                    const isWebApp = await this.isWebApplication(repo);
+                    if (!isWebApp) {
+                        console.log(`⏭️  Pulando: não é uma aplicação web`);
+                        continue;
+                    }
+
+                    console.log(`✨ É uma aplicação web! Verificando ferramentas de acessibilidade...`);
+
+                    // Verifica ferramentas de acessibilidade
+                    const toolsFound = await this.checkAccessibilityTools(repo);
+                    const hasAccessibilityTools = Object.values(toolsFound).some(found => found);
+
+                    if (hasAccessibilityTools) {
+                        this.saveToCSV(repo, toolsFound);
+                        const foundTools = Object.keys(toolsFound).filter(tool => toolsFound[tool]);
+                        console.log(`🎯 Ferramentas encontradas: ${foundTools.join(', ')}`);
+                    } else {
+                        console.log(`❌ Nenhuma ferramenta de acessibilidade encontrada`);
+                    }
+
+                    // Pequena pausa para evitar rate limiting
+                    await this.sleep(100);
+                }
+
+                // Atualiza cursor e estado
+                hasNextPage = searchResult.pageInfo.hasNextPage;
+                cursor = searchResult.pageInfo.endCursor;
+                this.currentCursor = cursor;
+
+                // Salva estado a cada página
+                this.saveState();
+
+                console.log(`\n📈 Progresso: ${this.analyzedCount} analisados, ${this.savedCount} salvos`);
+
+                // Pausa entre páginas
+                await this.sleep(1000);
+            }
+
+        } catch (error) {
+            console.error('❌ Erro durante a mineração:', error);
+            this.saveState();
         }
 
-        this.stats.errors++;
-      }
+        this.printSummary();
     }
 
-    // Salvar repositórios restantes
-    if (foundRepos.length > 0) {
-      this.appendToCSV(foundRepos);
-      foundRepos.forEach((r) => this.processedRepos.add(r.repository));
+    // Imprime resumo final
+    printSummary() {
+        console.log('\n🎉 Mineração concluída!');
+        console.log(`📊 Resumo:`);
+        console.log(`   • Repositórios analisados: ${this.analyzedCount}`);
+        console.log(`   • Repositórios salvos: ${this.savedCount}`);
+        console.log(`   • Taxa de sucesso: ${this.analyzedCount > 0 ? ((this.savedCount / this.analyzedCount) * 100).toFixed(2) : 0}%`);
+        console.log(`   • Arquivo gerado: ${CSV_FILE}`);
+        
+        if (fs.existsSync(CSV_FILE)) {
+            const fileSize = fs.statSync(CSV_FILE).size;
+            console.log(`   • Tamanho do arquivo: ${(fileSize / 1024).toFixed(2)} KB`);
+        }
     }
-
-    this.saveProcessedRepos();
-
-    if (!this.timeoutTriggered) {
-      console.log(`\n🎉 EXECUÇÃO FINALIZADA COM SUCESSO!`);
-      this.printProgress();
-      console.log(`📄 Arquivo CSV: ${this.csvFile}`);
-      console.log(`🗃️ Arquivo de controle: ${this.processedReposFile}`);
-    }
-  }
 }
 
-// Executar
-const miner = new GitHubAccessibilityMiner();
-miner.run().catch((error) => {
-  console.error("💥 Erro fatal:", error);
-  process.exit(1);
+// Execução principal
+async function main() {
+    if (!GITHUB_TOKEN) {
+        console.error('❌ Token do GitHub não encontrado. Configure a variável de ambiente GITHUB_TOKEN');
+        process.exit(1);
+    }
+
+    const miner = new GitHubMiner();
+    await miner.mine();
+}
+
+// Tratamento de sinais para salvar estado antes de encerrar
+process.on('SIGINT', () => {
+    console.log('\n🛑 Interrompido pelo usuário. Salvando estado...');
+    process.exit(0);
 });
+
+process.on('SIGTERM', () => {
+    console.log('\n🛑 Processo terminado. Salvando estado...');
+    process.exit(0);
+});
+
+// Inicia a mineração
+if (require.main === module) {
+    main().catch(error => {
+        console.error('❌ Erro fatal:', error);
+        process.exit(1);
+    });
+}
+
+module.exports = GitHubMiner;
