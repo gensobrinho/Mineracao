@@ -172,6 +172,61 @@ const LIBRARY_KEYWORDS = [
     'react-native'
 ];
 
+
+// Sistema de Cache para Otimização
+const CACHE_FILE = 'analysis_cache.json';
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
+
+class AnalysisCache {
+    constructor() {
+        this.cache = new Map();
+        this.loadCache();
+    }
+    
+    loadCache() {
+        try {
+            if (fs.existsSync(CACHE_FILE)) {
+                const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+                Object.entries(data).forEach(([key, value]) => {
+                    if (Date.now() - value.timestamp < CACHE_TTL) {
+                        this.cache.set(key, value.result);
+                    }
+                });
+                console.log(`📋 Cache carregado: ${this.cache.size} análises válidas`);
+            }
+        } catch (error) {
+            console.log(`⚠️ Erro ao carregar cache: ${error.message}`);
+        }
+    }
+    
+    saveCache() {
+        try {
+            const cacheData = {};
+            this.cache.forEach((result, key) => {
+                cacheData[key] = {
+                    result,
+                    timestamp: Date.now()
+                };
+            });
+            fs.writeFileSync(CACHE_FILE, JSON.stringify(cacheData, null, 2));
+        } catch (error) {
+            console.log(`⚠️ Erro ao salvar cache: ${error.message}`);
+        }
+    }
+    
+    get(key) {
+        return this.cache.get(key);
+    }
+    
+    set(key, value) {
+        this.cache.set(key, value);
+    }
+    
+    has(key) {
+        return this.cache.has(key);
+    }
+}
+
 class GitHubMiner {
     constructor() {
         this.tokens = TOKENS;
@@ -303,6 +358,28 @@ class GitHubMiner {
         }
         return false;
     }
+
+    
+    // Rate limiting inteligente baseado em headers
+    async intelligentRateLimit() {
+        const currentLimit = this.tokenLimits[this.tokenIndex];
+        
+        if (currentLimit && currentLimit < 500) {
+            // Calcula delay baseado no rate limit restante
+            const delayFactor = Math.max(1, (500 - currentLimit) / 100);
+            const delay = Math.min(delayFactor * 100, 2000); // Max 2s
+            
+            console.log(`   ⏳ Rate limit baixo (${currentLimit}), aguardando ${delay}ms...`);
+            await this.sleep(delay);
+        }
+        
+        // Troca token se muito baixo
+        if (currentLimit && currentLimit < 100 && this.tokens.length > 1) {
+            console.log(`   🔄 Rate limit crítico, trocando token...`);
+            this.nextToken();
+        }
+    }
+
 
     // Inicializa o arquivo CSV se não existir
     initializeCSV() {
@@ -438,6 +515,43 @@ class GitHubMiner {
 
         return await this.makeRequest(url, options);
     }
+
+    
+    // Sistema de batch para otimizar requisições
+    async batchFileCheck(repo, files) {
+        console.log(`   📦 Verificando ${files.length} arquivos em batch...`);
+        
+        const batchSize = 3;
+        const results = new Map();
+        
+        for (let i = 0; i < files.length; i += batchSize) {
+            const batch = files.slice(i, i + batchSize);
+            
+            const batchPromises = batch.map(async (file) => {
+                try {
+                    await this.intelligentRateLimit();
+                    const content = await this.getFileContent(repo, file);
+                    return { file, content, exists: !!content };
+                } catch (error) {
+                    return { file, content: null, exists: false };
+                }
+            });
+            
+            const batchResults = await Promise.allSettled(batchPromises);
+            
+            batchResults.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    results.set(result.value.file, result.value);
+                }
+            });
+            
+            // Pausa entre batches
+            await this.sleep(300);
+        }
+        
+        return results;
+    }
+
 
     // Busca conteúdo de arquivos do repositório
     async getFileContent(repo, filePath) {
@@ -670,6 +784,45 @@ class GitHubMiner {
         }
     }
 
+    
+    // Filtros antecipados para detectar bibliotecas óbvias (sem HTTP requests)
+    quickLibraryFilter(repo) {
+        const name = (repo.nameWithOwner || '').toLowerCase();
+        const description = (repo.description || '').toLowerCase();
+        
+        // Padrões definitivos de bibliotecas
+        const definiteLibraryPatterns = [
+            /^awesome-/, /^.*-awesome$/, /^.*-template$/, /^template-/,
+            /^.*-boilerplate$/, /^boilerplate-/, /^.*-starter$/, /^starter-/,
+            /^.*-cli$/, /^cli-/, /^.*-sdk$/, /^sdk-/, /^.*-plugin$/,
+            /^plugin-/, /^.*-component$/, /^component-/, /^.*-util$/,
+            /^.*-utils$/, /^util-/, /^utils-/, /^.*-helper$/, /^helper-/,
+            /^.*-lib$/, /^lib-/, /^.*-library$/, /^library-/
+        ];
+        
+        if (definiteLibraryPatterns.some(pattern => pattern.test(name))) {
+            console.log(`   ⚡ Biblioteca detectada rapidamente: ${name}`);
+            return 'library';
+        }
+        
+        // Padrões definitivos de aplicações
+        const definiteAppKeywords = [
+            'blog', 'website', 'portfolio', 'dashboard', 'admin panel',
+            'web application', 'webapp', 'web app', 'online tool',
+            'ecommerce', 'e-commerce', 'shop', 'store', 'marketplace',
+            'social network', 'chat app', 'forum', 'platform'
+        ];
+        
+        const combinedText = [description, name].join(' ');
+        if (definiteAppKeywords.some(keyword => combinedText.includes(keyword))) {
+            console.log(`   ⚡ Aplicação detectada rapidamente: palavras-chave`);
+            return 'webapp';
+        }
+        
+        return 'unknown'; // Precisa análise mais profunda
+    }
+
+
     // Verifica se o repositório é uma biblioteca/framework usando README
     async isLibrary(repo) {
         const owner = (repo.owner && repo.owner.login) || '';
@@ -862,6 +1015,57 @@ class GitHubMiner {
         console.log(`   ✅ Assumido como aplicação web (não é biblioteca)`);
         return false;
     }
+
+    
+    // Verificação paralela e otimizada de arquivos web
+    async checkWebFilesParallel(repo) {
+        const criticalWebFiles = [
+            'index.html', 'public/index.html', 'src/index.html',
+            'package.json', 'next.config.js', 'nuxt.config.js',
+            'vue.config.js', 'angular.json', 'webpack.config.js'
+        ];
+
+        console.log(`   ⚡ Verificação paralela de ${criticalWebFiles.length} arquivos críticos...`);
+
+        // Divide em batches para evitar rate limiting
+        const batchSize = 3;
+        const batches = [];
+        
+        for (let i = 0; i < criticalWebFiles.length; i += batchSize) {
+            batches.push(criticalWebFiles.slice(i, i + batchSize));
+        }
+
+        // Processa batches sequencialmente, arquivos em paralelo dentro do batch
+        for (const batch of batches) {
+            const batchPromises = batch.map(async (file) => {
+                try {
+                    const url = `${BASE_URL}/repos/${repo.nameWithOwner}/contents/${file}`;
+                    await this.makeRequest(url);
+                    console.log(`     📁 Arquivo encontrado: ${file}`);
+                    return { file, found: true };
+                } catch (error) {
+                    return { file, found: false };
+                }
+            });
+
+            const batchResults = await Promise.allSettled(batchPromises);
+            
+            // Se encontrou algum arquivo web, retorna imediatamente
+            for (const result of batchResults) {
+                if (result.status === 'fulfilled' && result.value.found) {
+                    console.log(`   ✅ Estrutura web detectada via: ${result.value.file}`);
+                    return true;
+                }
+            }
+
+            // Pequena pausa entre batches
+            await this.sleep(200);
+        }
+
+        console.log(`   ❌ Nenhuma estrutura web óbvia detectada`);
+        return false;
+    }
+
 
     // Verifica se é uma aplicação web
     async isWebApplication(repo) {
